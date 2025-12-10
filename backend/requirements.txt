@@ -1,0 +1,16 @@
+fastapi
+uvicorn
+pymongo
+python-dotenv
+pydantic
+requests
+python-multipart
+typing-extensions
+numpy
+scipy
+pandas
+matplotlib
+aiohttp
+httpx
+motor
+loguru

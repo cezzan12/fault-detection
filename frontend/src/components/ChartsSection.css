@@ -1,0 +1,133 @@
+.charts-section {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 24px;
+}
+
+.chart-card {
+  background: #ffffff;
+  border-radius: 12px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+  border: 1px solid #e2e8f0;
+  overflow: hidden;
+}
+
+.chart-header {
+  padding: 20px;
+  border-bottom: 1px solid #e2e8f0;
+  background: #f8fafc;
+}
+
+.chart-title {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.chart-icon {
+  color: #3b82f6;
+  margin-top: 2px;
+}
+
+.chart-title h3 {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 600;
+  color: #1e293b;
+}
+
+.chart-title p {
+  margin: 4px 0 0 0;
+  font-size: 0.8rem;
+  color: #64748b;
+}
+
+.chart-body {
+  padding: 20px;
+  min-height: 350px;
+}
+
+/* Legend styling for Customer Trends */
+.chart-body .recharts-legend-wrapper {
+  max-height: 60px;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+.chart-body .recharts-legend-item {
+  margin-right: 12px !important;
+  margin-bottom: 4px !important;
+}
+
+/* Custom Tooltip */
+.custom-tooltip {
+  background: rgba(30, 41, 59, 0.95);
+  border: none;
+  border-radius: 8px;
+  padding: 12px 16px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+}
+
+.tooltip-label {
+  color: #ffffff;
+  font-weight: 600;
+  margin: 0 0 8px 0;
+  font-size: 0.875rem;
+}
+
+.tooltip-value {
+  margin: 4px 0;
+  font-size: 0.8rem;
+}
+
+/* Responsive */
+@media (max-width: 1024px) {
+  .charts-section {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* Loading state */
+.chart-loading {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 300px;
+  color: #64748b;
+  gap: 12px;
+}
+
+.chart-loading .spinning {
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+/* Error state */
+.chart-error {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 300px;
+  color: #dc2626;
+  gap: 8px;
+  background: #fef2f2;
+  border-radius: 8px;
+  margin: 20px;
+}
+
+/* Empty state */
+.chart-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 300px;
+  color: #94a3b8;
+  gap: 12px;
+}
