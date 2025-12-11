@@ -478,3 +478,205 @@
   color: #94a3b8;
   max-width: 400px;
 }
+
+/* ==========================================
+   MULTI-SELECT STYLES
+   ========================================== */
+
+/* Checkbox Column */
+.checkbox-column {
+  width: 45px;
+  text-align: center !important;
+  padding: 12px 8px !important;
+}
+
+.machine-checkbox {
+  width: 18px;
+  height: 18px;
+  cursor: pointer;
+  accent-color: #6366f1;
+}
+
+/* Row checked state (different from selected) */
+.row-checked {
+  background: linear-gradient(90deg, #f5f3ff 0%, #faf5ff 100%) !important;
+}
+
+.row-checked:hover {
+  background: linear-gradient(90deg, #ede9fe 0%, #f5f3ff 100%) !important;
+}
+
+/* Multi-select Action Bar */
+.multi-select-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 20px;
+  background: linear-gradient(135deg, #6366f1, #8b5cf6);
+  color: white;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.selection-info {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 0.9rem;
+}
+
+.selection-info strong {
+  font-weight: 700;
+}
+
+.clear-selection-btn {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 10px;
+  background: rgba(255, 255, 255, 0.2);
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  border-radius: 6px;
+  color: white;
+  font-size: 0.8rem;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.clear-selection-btn:hover {
+  background: rgba(255, 255, 255, 0.3);
+}
+
+.selection-actions {
+  display: flex;
+  gap: 10px;
+}
+
+/* Bulk Select Actions in Header */
+.bulk-select-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.btn-sm {
+  padding: 6px 12px !important;
+  font-size: 0.75rem !important;
+}
+
+/* ==========================================
+   MULTI-REPORT GENERATOR STYLES
+   ========================================== */
+
+.multi-report-generator {
+  position: relative;
+}
+
+.dropdown-container {
+  position: relative;
+}
+
+.dropdown-trigger {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 16px;
+  background: white;
+  color: #1e293b;
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  border-radius: 8px;
+  font-size: 0.875rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.dropdown-trigger:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.95);
+}
+
+.dropdown-trigger:disabled {
+  opacity: 0.8;
+  cursor: not-allowed;
+}
+
+.chevron {
+  transition: transform 0.2s;
+}
+
+.chevron.open {
+  transform: rotate(180deg);
+}
+
+.dropdown-menu {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  min-width: 260px;
+  background: white;
+  border-radius: 12px;
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.15);
+  border: 1px solid #e2e8f0;
+  z-index: 100;
+  overflow: hidden;
+  animation: dropdownFadeIn 0.15s ease-out;
+}
+
+@keyframes dropdownFadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(-8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.dropdown-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  width: 100%;
+  padding: 14px 16px;
+  background: none;
+  border: none;
+  cursor: pointer;
+  transition: background 0.15s;
+  text-align: left;
+}
+
+.dropdown-item:hover {
+  background: #f8fafc;
+}
+
+.dropdown-item:first-child {
+  border-bottom: 1px solid #e2e8f0;
+}
+
+.dropdown-item svg {
+  color: #6366f1;
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+
+.dropdown-item-content {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.dropdown-item-title {
+  font-weight: 600;
+  color: #1e293b;
+  font-size: 0.9rem;
+}
+
+.dropdown-item-desc {
+  font-size: 0.75rem;
+  color: #64748b;
+}
+
+/* Spinning animation for loader */
+.spinning {
+  animation: spin 1s linear infinite;
+}

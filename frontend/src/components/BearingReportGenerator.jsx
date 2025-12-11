@@ -361,12 +361,41 @@ const BearingReportGenerator = ({ machine, bearing, bearings = [], isSingleBeari
         });
       });
       
-      // Save PDF
+      // Open PDF in new tab and trigger download
       const bearingName = isSingleBearing && bearing ? 
         (bearing._id || bearing.bearingId || 'bearing').substring(0, 20) : 
         'all_bearings';
       const fileName = `Report_${machineName.replace(/[^a-zA-Z0-9()-]/g, '_')}_${bearingName}_${new Date().toISOString().split('T')[0]}.pdf`;
-      pdf.save(fileName);
+      
+      // Get PDF as blob and create object URL
+      const pdfBlob = pdf.output('blob');
+      const pdfUrl = URL.createObjectURL(pdfBlob);
+      
+      // Open in new tab
+      const newTab = window.open(pdfUrl, '_blank');
+      
+      if (!newTab || newTab.closed || typeof newTab.closed === 'undefined') {
+        // Fallback: direct download
+        const link = document.createElement('a');
+        link.href = pdfUrl;
+        link.download = fileName;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+      } else {
+        // Trigger download in new tab
+        setTimeout(() => {
+          try {
+            const link = newTab.document.createElement('a');
+            link.href = pdfUrl;
+            link.download = fileName;
+            newTab.document.body.appendChild(link);
+            link.click();
+          } catch (e) {
+            console.log('Download triggered via new tab view');
+          }
+        }, 500);
+      }
       
     } catch (error) {
       console.error('Report generation failed:', error);

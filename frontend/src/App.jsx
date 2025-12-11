@@ -191,7 +191,7 @@ function App() {
         machineName: machine.name || machine.machineName || 'Unknown',
         machineId: machine.machineId || machine._id || 'N/A',
         status: (machine.statusName || machine.status || 'normal').toLowerCase(),
-        type: machine.type || machine.machineType || 'OFFLINE',
+        type: (machine.machineType && machine.machineType !== 'N/A' ? machine.machineType : machine.type || 'OFFLINE').toUpperCase(),
         areaId: machine.areaId || 'N/A',
         subareaId: machine.subAreaId || 'N/A',
         date: machine.dataUpdatedTime ? machine.dataUpdatedTime.split('T')[0] : 'N/A'
@@ -237,8 +237,8 @@ function App() {
     
     performAutoSync();
     
-    // Also set up periodic sync check every 2 minutes
-    const syncInterval = setInterval(performAutoSync, 2 * 60 * 1000);
+    // Also set up periodic sync check every 30 seconds
+    const syncInterval = setInterval(performAutoSync, 30 * 1000);
     
     return () => clearInterval(syncInterval);
   }, []);

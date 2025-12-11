@@ -414,8 +414,6 @@ async def get_machines(
             ("customerId", "N/A"),
             ("statusName", "N/A"),
             ("areaId", "N/A"),
-            ("type", "N/A"),
-            ("machineType", "N/A"),
             ("dataUpdatedTime", "N/A"),
             ("name", ""),
         ]
@@ -423,6 +421,14 @@ async def get_machines(
             for field, default in required_fields:
                 if field not in m or m[field] in [None, ""]:
                     m[field] = default
+            
+            # Handle type/machineType - check machineType first (contains online/offline)
+            if "machineType" in m and m["machineType"] not in [None, "", "N/A"]:
+                m["type"] = m["machineType"].upper() if isinstance(m["machineType"], str) else "OFFLINE"
+            elif "type" not in m or m["type"] in [None, "", "N/A"]:
+                m["type"] = "OFFLINE"
+            elif isinstance(m["type"], str):
+                m["type"] = m["type"].upper()
         
         # Convert MongoDB ObjectIds and other non-serializable objects to JSON-serializable format
         machines_serialized = make_json_serializable(all_machines)

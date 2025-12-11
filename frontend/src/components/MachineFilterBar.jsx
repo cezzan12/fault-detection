@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useMemo } from 'react';
-import { Calendar, Filter, RefreshCw, MapPin, Users, Activity, Search, Cpu, Hash, Sparkles } from 'lucide-react';
+import { Calendar, Filter, RefreshCw, MapPin, Users, Activity, Search, Cpu, Hash, Sparkles, Clock } from 'lucide-react';
 import './MachineFilterBar.css';
 
 // Get default dates
@@ -252,6 +252,20 @@ const MachineFilterBar = ({
     }
   };
 
+  const handleToday = () => {
+    const { today } = getDefaultDates();
+    const todayFilters = {
+      ...filters,
+      fromDate: today,
+      toDate: today
+    };
+    setFilters(todayFilters);
+    console.log('Filtering for today:', today);
+    if (onApplyFilter) {
+      onApplyFilter({ ...todayFilters, searchField, searchQuery });
+    }
+  };
+
   const SelectedIcon = SEARCH_FIELDS.find(f => f.value === searchField)?.icon || Search;
 
   return (
@@ -431,6 +445,10 @@ const MachineFilterBar = ({
           </div>
 
           <div className="filter-actions">
+            <button className="btn btn-today" onClick={handleToday}>
+              <Clock size={16} />
+              Today
+            </button>
             <button className="btn btn-secondary" onClick={handleReset}>
               <RefreshCw size={16} />
               Reset

@@ -92,14 +92,21 @@ async def sync_machines_for_date(db, date_str: str) -> dict:
             ("customerId", "N/A"),
             ("statusName", "N/A"),
             ("areaId", "N/A"),
-            ("type", "N/A"),
-            ("machineType", "N/A"),
             ("dataUpdatedTime", "N/A"),
             ("name", ""),
         ]
         for field, default in required_fields:
             if field not in machine or machine[field] in [None, ""]:
                 machine[field] = default
+        
+        # Handle type/machineType - check for value in machineType first, then type
+        # machineType typically contains "online" or "offline"
+        if "machineType" in machine and machine["machineType"] not in [None, "", "N/A"]:
+            machine["type"] = machine["machineType"].upper()  # Normalize to uppercase
+        elif "type" not in machine or machine["type"] in [None, ""]:
+            machine["type"] = "OFFLINE"  # Default to OFFLINE
+        else:
+            machine["type"] = machine["type"].upper() if isinstance(machine["type"], str) else "OFFLINE"
         
         # Use upsert to avoid duplicates
         # Create a unique identifier based on machine properties

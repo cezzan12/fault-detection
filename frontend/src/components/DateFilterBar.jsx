@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Calendar, Filter, RefreshCw, Users } from 'lucide-react';
+import { Calendar, Filter, RefreshCw, Users, Clock } from 'lucide-react';
 import './DateFilterBar.css';
 
 // Get default dates
@@ -47,6 +47,16 @@ const DateFilterBar = ({
     console.log('Filters reset');
     if (onApplyFilter) {
       onApplyFilter({ fromDate: weekAgo, toDate: today, status: 'All', customerId: 'All' });
+    }
+  };
+
+  const handleToday = () => {
+    const { today } = getDefaultDates();
+    setFromDate(today);
+    setToDate(today);
+    console.log('Filtering for today:', today);
+    if (onApplyFilter) {
+      onApplyFilter({ fromDate: today, toDate: today, status, customerId });
     }
   };
 
@@ -117,6 +127,10 @@ const DateFilterBar = ({
         </div>
 
         <div className="filter-actions">
+          <button className="btn btn-today" onClick={handleToday}>
+            <Clock size={16} />
+            Today
+          </button>
           <button className="btn btn-secondary" onClick={handleReset}>
             <RefreshCw size={16} />
             Reset

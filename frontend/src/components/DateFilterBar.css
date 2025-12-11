@@ -137,6 +137,17 @@
   color: #475569;
 }
 
+.btn-today {
+  background: linear-gradient(135deg, #10b981, #059669);
+  color: #ffffff;
+}
+
+.btn-today:hover {
+  background: linear-gradient(135deg, #059669, #047857);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(16, 185, 129, 0.4);
+}
+
 @media (max-width: 992px) {
   .filter-bar-content {
     flex-direction: column;

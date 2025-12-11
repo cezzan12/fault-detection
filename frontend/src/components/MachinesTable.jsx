@@ -1,6 +1,7 @@
 import React, { useState, useMemo } from 'react';
-import { ChevronLeft, ChevronRight, Eye, Wifi, WifiOff, Loader2, AlertTriangle, Database, FileText, Download } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Eye, Wifi, WifiOff, Loader2, AlertTriangle, Database, FileText, Download, CheckSquare, Square, XCircle } from 'lucide-react';
 import ReportGenerator from './ReportGenerator';
+import MultiReportGenerator from './MultiReportGenerator';
 import './MachinesTable.css';
 
 const ROWS_PER_PAGE = 10;
@@ -37,6 +38,7 @@ const TypeBadge = ({ type }) => {
 const MachinesTable = ({ data = [], filters, loading = false, error = null, onMachineClick }) => {
   const [currentPage, setCurrentPage] = useState(1);
   const [selectedMachine, setSelectedMachine] = useState(null);
+  const [selectedMachines, setSelectedMachines] = useState([]); // Multi-select for reports
   const [generatingReport, setGeneratingReport] = useState(false);
 
   // Data is already filtered by API, but we do client-side filtering as backup
@@ -125,6 +127,43 @@ const MachinesTable = ({ data = [], filters, loading = false, error = null, onMa
 
   const handleMachineSelect = (machine) => {
     setSelectedMachine(selectedMachine?.id === machine.id ? null : machine);
+  };
+
+  // Multi-select handlers for bulk report generation
+  const handleCheckboxChange = (machine, e) => {
+    e.stopPropagation();
+    setSelectedMachines(prev => {
+      const isSelected = prev.some(m => m.id === machine.id);
+      if (isSelected) {
+        return prev.filter(m => m.id !== machine.id);
+      } else {
+        return [...prev, machine];
+      }
+    });
+  };
+
+  const handleSelectAll = () => {
+    if (selectedMachines.length === currentData.length) {
+      setSelectedMachines([]);
+    } else {
+      setSelectedMachines([...currentData]);
+    }
+  };
+
+  const handleSelectAllFiltered = () => {
+    if (selectedMachines.length === filteredData.length) {
+      setSelectedMachines([]);
+    } else {
+      setSelectedMachines([...filteredData]);
+    }
+  };
+
+  const clearSelection = () => {
+    setSelectedMachines([]);
+  };
+
+  const isMachineSelected = (machine) => {
+    return selectedMachines.some(m => m.id === machine.id);
   };
 
   const generateReport = async () => {
@@ -241,6 +280,26 @@ ${selectedMachine.status === 'unacceptable' ? '• IMMEDIATE inspection required
 
   return (
     <div className="machines-table-container">
+      {/* Multi-select Action Bar */}
+      {selectedMachines.length > 0 && (
+        <div className="multi-select-bar">
+          <div className="selection-info">
+            <CheckSquare size={18} />
+            <span><strong>{selectedMachines.length}</strong> machine{selectedMachines.length !== 1 ? 's' : ''} selected</span>
+            <button className="clear-selection-btn" onClick={clearSelection}>
+              <XCircle size={14} />
+              Clear
+            </button>
+          </div>
+          <div className="selection-actions">
+            <MultiReportGenerator 
+              machines={selectedMachines}
+              onClearSelection={clearSelection}
+            />
+          </div>
+        </div>
+      )}
+
       <div className="table-header">
         <div className="table-info">
           <h3>Machine Inventory</h3>
@@ -248,13 +307,42 @@ ${selectedMachine.status === 'unacceptable' ? '• IMMEDIATE inspection required
             Showing {startIndex + 1}-{Math.min(endIndex, filteredData.length)} of {filteredData.length} machines
           </span>
         </div>
+        {filteredData.length > 0 && (
+          <div className="bulk-select-actions">
+            <button 
+              className="btn btn-secondary btn-sm"
+              onClick={handleSelectAll}
+            >
+              {selectedMachines.length === currentData.length && currentData.length > 0 
+                ? 'Deselect Page' 
+                : 'Select Page'}
+            </button>
+            <button 
+              className="btn btn-secondary btn-sm"
+              onClick={handleSelectAllFiltered}
+            >
+              {selectedMachines.length === filteredData.length && filteredData.length > 0
+                ? `Deselect All (${filteredData.length})`
+                : `Select All (${filteredData.length})`}
+            </button>
+          </div>
+        )}
       </div>
 
       <div className="table-wrapper">
         <table className="machines-table">
           <thead>
             <tr>
-              <th className="select-column">Select</th>
+              <th className="checkbox-column">
+                <input
+                  type="checkbox"
+                  checked={currentData.length > 0 && currentData.every(m => isMachineSelected(m))}
+                  onChange={handleSelectAll}
+                  className="machine-checkbox"
+                  title="Select all on this page"
+                />
+              </th>
+              <th className="select-column">View</th>
               <th>Customer ID</th>
               <th>Machine Name</th>
               <th>Machine ID</th>
@@ -271,9 +359,17 @@ ${selectedMachine.status === 'unacceptable' ? '• IMMEDIATE inspection required
               currentData.map((machine, index) => (
                 <React.Fragment key={machine.id}>
                 <tr 
-                  className={`${index % 2 === 0 ? 'row-even' : 'row-odd'} ${selectedMachine?.id === machine.id ? 'row-selected' : ''}`}
+                  className={`${index % 2 === 0 ? 'row-even' : 'row-odd'} ${selectedMachine?.id === machine.id ? 'row-selected' : ''} ${isMachineSelected(machine) ? 'row-checked' : ''}`}
                   onClick={() => handleMachineSelect(machine)}
                 >
+                  <td className="checkbox-column" onClick={(e) => e.stopPropagation()}>
+                    <input
+                      type="checkbox"
+                      checked={isMachineSelected(machine)}
+                      onChange={(e) => handleCheckboxChange(machine, e)}
+                      className="machine-checkbox"
+                    />
+                  </td>
                   <td className="select-column">
                     <input
                       type="radio"
@@ -309,7 +405,7 @@ ${selectedMachine.status === 'unacceptable' ? '• IMMEDIATE inspection required
                 {/* Download Report row - appears below selected machine */}
                 {selectedMachine?.id === machine.id && (
                   <tr className="download-row">
-                    <td colSpan="10">
+                    <td colSpan="11">
                       <div className="download-row-content">
                         <div className="selected-machine-info">
                           <FileText size={16} />
@@ -328,7 +424,7 @@ ${selectedMachine.status === 'unacceptable' ? '• IMMEDIATE inspection required
               ))
             ) : (
               <tr>
-                <td colSpan="10" className="empty-state">
+                <td colSpan="11" className="empty-state">
                   No machines found matching your filters.
                 </td>
               </tr>
