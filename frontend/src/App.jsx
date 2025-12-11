@@ -237,8 +237,8 @@ function App() {
     
     performAutoSync();
     
-    // Also set up periodic sync check every 30 seconds
-    const syncInterval = setInterval(performAutoSync, 30 * 1000);
+    // Also set up periodic sync check every 4 minutes
+    const syncInterval = setInterval(performAutoSync, 4 * 60 * 1000);
     
     return () => clearInterval(syncInterval);
   }, []);

@@ -260,7 +260,8 @@ const MachineFilterBar = ({
       toDate: today
     };
     setFilters(todayFilters);
-    console.log('Filtering for today:', today);
+    console.log('Today filter set (click Apply Filter to apply):', today);
+    // Apply immediately to show today's data
     if (onApplyFilter) {
       onApplyFilter({ ...todayFilters, searchField, searchQuery });
     }
