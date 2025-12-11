@@ -563,14 +563,25 @@ async def get_machine_bearing_data(
                     logging.error(f"External API error: {response.status_code} - {response.text}")
                     continue
                 data = response.json()
+                logging.info(f"External API response keys: {data.keys() if isinstance(data, dict) else 'not a dict'}")
+                logging.info(f"External API response sample: {str(data)[:500]}")
                 all_data.append(data)
 
         if not all_data:
+            logging.warning(f"No data returned from external API for bearing {bearing_id}")
             raise HTTPException(status_code=404, detail="No data found for this bearing")
 
         merged = all_data[0]
+        # Ensure rawData is available as rowdata for frontend compatibility
         if "rawData" in merged:
             merged["rowdata"] = merged["rawData"]
+        # Also check for other common data field names
+        if "data" in merged and isinstance(merged["data"], list):
+            merged["rowdata"] = merged["data"]
+        if "fftData" not in merged and "rowdata" in merged:
+            merged["fftData"] = merged["rowdata"]
+        
+        logging.info(f"Final merged data keys: {merged.keys()}")
 
         # Convert MongoDB ObjectIds and other non-serializable objects to JSON-serializable format
         merged_serialized = make_json_serializable(merged)

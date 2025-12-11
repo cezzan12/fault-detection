@@ -76,7 +76,7 @@ async def stacked_chart(
     # Map data for faster lookup
     data_map = {(item["_id"]["date"], item["_id"]["status"]): item["count"] for item in data}
 
-    statuses = ["Normal", "Unsatisfactory", "Alert", "Satisfactory"]
+    statuses = ["Normal", "Unacceptable", "Alert", "Satisfactory"]
 
     def daily_dates():
         current = start

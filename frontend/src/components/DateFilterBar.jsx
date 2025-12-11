@@ -11,7 +11,7 @@ const getDefaultDates = () => {
 
 const DateFilterBar = ({ 
   onApplyFilter,
-  statusOptions = ['All', 'Normal', 'Satisfactory', 'Alert', 'Unsatisfactory'],
+  statusOptions = ['All', 'Normal', 'Satisfactory', 'Alert', 'Unacceptable'],
   customerOptions = ['All'],
   initialFilters = {}
 }) => {

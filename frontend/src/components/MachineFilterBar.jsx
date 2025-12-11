@@ -21,7 +21,7 @@ const SEARCH_FIELDS = [
 const MachineFilterBar = ({ 
   onApplyFilter,
   areaOptions = ['All'],
-  statusOptions = ['All', 'Normal', 'Satisfactory', 'Alert', 'Unsatisfactory'],
+  statusOptions = ['All', 'Normal', 'Satisfactory', 'Alert', 'Unacceptable'],
   customerOptions = ['All'],
   initialFilters = {},
   onSearch,

@@ -26,8 +26,8 @@ const StatusBadge = ({ status }) => {
     normal: { label: 'Normal', className: 'badge-normal' },
     satisfactory: { label: 'Satisfactory', className: 'badge-satisfactory' },
     alert: { label: 'Alert', className: 'badge-alert' },
-    unacceptable: { label: 'Unsatisfactory', className: 'badge-unacceptable' },
-    unsatisfactory: { label: 'Unsatisfactory', className: 'badge-unacceptable' }
+    unacceptable: { label: 'Unacceptable', className: 'badge-unacceptable' },
+    unsatisfactory: { label: 'Unacceptable', className: 'badge-unacceptable' }
   };
 
   const normalizedStatus = (status || 'normal').toLowerCase();
@@ -136,16 +136,8 @@ const MachineDetail = ({ machineId, machineInfo, onBack }) => {
   };
 
   const generateMockFFTData = () => {
-    const data = [];
-    for (let i = 0; i < 200; i++) {
-      const freq = (i / 200) * 1000;
-      let amplitude = Math.random() * 0.02;
-      if (Math.abs(freq - 50) < 5) amplitude += 0.3;
-      if (Math.abs(freq - 100) < 5) amplitude += 0.15;
-      if (Math.abs(freq - 150) < 5) amplitude += 0.08;
-      data.push({ frequency: freq, amplitude });
-    }
-    return { fftData: data, axis: 'V-Axis' };
+    // Return empty FFT data when API fails - no random data
+    return { fftData: [], axis: 'V-Axis', message: 'No data available' };
   };
 
   const formatDate = (dateStr) => {

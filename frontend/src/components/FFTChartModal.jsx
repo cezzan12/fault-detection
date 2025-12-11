@@ -34,17 +34,14 @@ const FFTChartModal = ({ bearing, machine, fftData, loading, onClose }) => {
       data = fftData;
     }
 
-    // Generate mock data if no real data
+    // If no real data available, show empty chart
     if (data.length === 0) {
-      for (let i = 0; i < 200; i++) {
-        const freq = (i / 200) * 1000;
-        let amplitude = Math.random() * 0.02;
-        if (Math.abs(freq - 50) < 5) amplitude += 0.3;
-        if (Math.abs(freq - 100) < 5) amplitude += 0.15;
-        if (Math.abs(freq - 150) < 5) amplitude += 0.08;
-        if (Math.abs(freq - 180) < 10) amplitude += 0.05;
-        data.push({ frequency: freq, amplitude });
-      }
+      // Draw "No Data Available" message
+      ctx.fillStyle = '#64748b';
+      ctx.font = '14px Inter, system-ui, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('No FFT data available', padding.left + chartWidth / 2, padding.top + chartHeight / 2);
+      return;
     }
 
     // Background

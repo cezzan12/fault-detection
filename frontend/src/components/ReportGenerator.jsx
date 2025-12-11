@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import jsPDF from 'jspdf';
 import { FileText, Loader2 } from 'lucide-react';
+import { fetchMachineById, fetchMachineBearingData } from '../services/api';
 
 // Company logo as base64 (will be loaded dynamically)
 let companyLogoBase64 = null;
@@ -33,70 +34,229 @@ const SEVERITY_COLORS = {
   D: { bg: [239, 68, 68], text: 'Unacceptable', level: 4 }  // Red
 };
 
-// Generate mock bearing data for demonstration
-const generateMockBearingData = (machine) => {
-  const bearings = ['Motor DE', 'Motor NDE', 'Pump DE', 'Pump NDE'];
-  const date = machine.date || new Date().toISOString().split('T')[0];
+// Calculate RMS from raw time-domain data (array of amplitude values)
+const calculateRMS = (data) => {
+  if (!data || data.length === 0) return null;
+  // Handle both array of numbers and array of objects
+  const values = data.map(d => {
+    if (typeof d === 'number') return d;
+    return d.amplitude || d.value || d.y || 0;
+  });
+  const sumOfSquares = values.reduce((sum, val) => sum + val * val, 0);
+  return Math.sqrt(sumOfSquares / values.length);
+};
+
+// Convert raw time-domain data to frequency-amplitude pairs for FFT display
+const convertRawDataToFFT = (rawData, sampleRate = 20000) => {
+  if (!rawData || rawData.length === 0) return [];
   
-  return bearings.map((bearingName, idx) => {
-    // Generate realistic vibration values based on machine status
-    const statusMultiplier = machine.status === 'unacceptable' ? 2.5 : 
-                            machine.status === 'alert' ? 1.8 : 
-                            machine.status === 'satisfactory' ? 1.2 : 1.0;
+  // If data is already in frequency-amplitude format, return as-is
+  if (typeof rawData[0] === 'object' && (rawData[0].frequency !== undefined || rawData[0].freq !== undefined)) {
+    return rawData.map((point, idx) => ({
+      frequency: point.frequency || point.freq || point.x || idx * 10,
+      amplitude: Math.abs(point.amplitude || point.value || point.y || point.amp || 0)
+    }));
+  }
+  
+  // Raw data is array of amplitude values - convert to frequency-amplitude pairs
+  // Use a simple approach: treat as time-domain samples and create spectrum-like display
+  const n = rawData.length;
+  const freqResolution = sampleRate / n;
+  
+  // Take first half of data points for spectrum (Nyquist)
+  const numPoints = Math.min(Math.floor(n / 2), 1000); // Limit to 1000 points for performance
+  const result = [];
+  
+  for (let i = 0; i < numPoints; i++) {
+    const freq = i * freqResolution;
+    // Use absolute value of raw amplitude for display
+    const amp = Math.abs(rawData[i] || 0);
+    result.push({ frequency: freq, amplitude: amp });
+  }
+  
+  return result;
+};
+
+// Extract metrics from API response data
+const extractMetricsFromData = (data) => {
+  // Check if data has direct metric fields
+  if (data.velocity_rms !== undefined || data.vel !== undefined) {
+    return {
+      vel: data.velocity_rms?.toFixed(2) || data.vel?.toFixed(2) || null,
+      acc: data.acceleration_rms?.toFixed(3) || data.acc?.toFixed(3) || null,
+      env: data.envelope?.toFixed(3) || data.env?.toFixed(3) || null,
+      temp: data.temperature?.toFixed(1) || data.temp?.toFixed(1) || null
+    };
+  }
+  
+  // Try to compute RMS from raw data
+  const rawData = data.rowdata || data.rawData || data.fftData || [];
+  if (rawData.length > 0) {
+    const rmsValue = calculateRMS(rawData);
+    return {
+      vel: rmsValue ? rmsValue.toFixed(2) : null,
+      acc: null,
+      env: null,
+      temp: null
+    };
+  }
+  
+  return { vel: null, acc: null, env: null, temp: null };
+};
+
+// Fetch real bearing data from API
+const fetchRealBearingData = async (machineId, bearings, machineType) => {
+  const date = new Date().toISOString().split('T')[0];
+  const bearingsData = [];
+  
+  for (const bearing of bearings) {
+    const bearingId = bearing._id || bearing.bearingId;
+    const bearingName = bearing.name || bearing.bearingName || bearingId;
     
-    const baseVel = (0.5 + Math.random() * 1.5) * statusMultiplier;
-    const baseAcc = (0.1 + Math.random() * 0.3) * statusMultiplier;
-    const baseEnv = (0.05 + Math.random() * 0.15) * statusMultiplier;
+    // First try to get metrics directly from bearing object
+    const bearingMetrics = {
+      vel: bearing.velocity_rms?.toFixed?.(2) || bearing.vel?.toFixed?.(2) || null,
+      acc: bearing.acceleration_rms?.toFixed?.(3) || bearing.acc?.toFixed?.(3) || null,
+      env: bearing.envelope?.toFixed?.(3) || bearing.env?.toFixed?.(3) || null,
+      temp: bearing.temperature?.toFixed?.(1) || bearing.temp?.toFixed?.(1) || null
+    };
+    
+    try {
+      // Fetch data for each axis
+      const axisData = {};
+      for (const axis of ['H-Axis', 'V-Axis', 'A-Axis']) {
+        try {
+          const response = await fetchMachineBearingData(machineId, bearingId, {
+            date: date,
+            axis: axis,
+            data_type: machineType || 'OFFLINE',
+            analytics_type: 'MF'
+          });
+          
+          console.log(`[ReportGenerator] Response for ${bearingId} ${axis}:`, response);
+          
+          if (response && response.data) {
+            const data = response.data;
+            // Extract FFT data from response
+            const fftRawData = data.rowdata || data.rawData || data.fftData || [];
+            // Try to extract metrics from API response
+            const apiMetrics = extractMetricsFromData(data);
+            
+            // Convert raw data to FFT format for display
+            const convertedFFTData = convertRawDataToFFT(fftRawData, bearing.sr || 20000);
+            
+            axisData[axis.charAt(0)] = {
+              vel: apiMetrics.vel || bearingMetrics.vel || '-',
+              acc: apiMetrics.acc || bearingMetrics.acc || '-',
+              env: apiMetrics.env || bearingMetrics.env || '-',
+              temp: apiMetrics.temp || bearingMetrics.temp || '-',
+              fftData: convertedFFTData
+            };
+            console.log(`[ReportGenerator] Processed ${axis} data with ${convertedFFTData.length} FFT points`);
+          } else {
+            // No data from API, use bearing-level metrics
+            axisData[axis.charAt(0)] = {
+              vel: bearingMetrics.vel || '-',
+              acc: bearingMetrics.acc || '-',
+              env: bearingMetrics.env || '-',
+              temp: bearingMetrics.temp || '-',
+              fftData: []
+            };
+          }
+        } catch (axisErr) {
+          console.warn(`Failed to fetch ${axis} data for bearing ${bearingId}:`, axisErr);
+          axisData[axis.charAt(0)] = {
+            vel: bearingMetrics.vel || '-',
+            acc: bearingMetrics.acc || '-',
+            env: bearingMetrics.env || '-',
+            temp: bearingMetrics.temp || '-',
+            fftData: []
+          };
+        }
+      }
+      
+      bearingsData.push({
+        bearingId,
+        bearingName,
+        date,
+        status: bearing.statusName || bearing.status || 'satisfactory',
+        sr: 20000,
+        axisData
+      });
+    } catch (err) {
+      console.warn(`Failed to fetch data for bearing ${bearingId}:`, err);
+      bearingsData.push({
+        bearingId,
+        bearingName,
+        date,
+        status: bearing.statusName || bearing.status || 'satisfactory',
+        sr: 20000,
+        axisData: { 
+          H: { vel: bearingMetrics.vel || '-', acc: bearingMetrics.acc || '-', env: bearingMetrics.env || '-', temp: bearingMetrics.temp || '-', fftData: [] },
+          V: { vel: bearingMetrics.vel || '-', acc: bearingMetrics.acc || '-', env: bearingMetrics.env || '-', temp: bearingMetrics.temp || '-', fftData: [] },
+          A: { vel: bearingMetrics.vel || '-', acc: bearingMetrics.acc || '-', env: bearingMetrics.env || '-', temp: bearingMetrics.temp || '-', fftData: [] }
+        }
+      });
+    }
+  }
+  
+  return bearingsData;
+};
+
+// Process bearing data for report (use real data only)
+const processBearingDataForReport = (bearingsData) => {
+  return bearingsData.map(bearing => {
+    const metrics = {};
+    const fftData = {};
+    
+    ['H', 'V', 'A'].forEach(axis => {
+      if (bearing.axisData && bearing.axisData[axis]) {
+        // Use real data
+        metrics[axis] = {
+          vel: bearing.axisData[axis].vel,
+          acc: bearing.axisData[axis].acc,
+          env: bearing.axisData[axis].env,
+          temp: bearing.axisData[axis].temp
+        };
+        
+        // Process FFT data if available
+        if (bearing.axisData[axis].fftData && bearing.axisData[axis].fftData.length > 0) {
+          fftData[axis] = bearing.axisData[axis].fftData.map((point, idx) => ({
+            freq: point.frequency || point.freq || (idx / bearing.axisData[axis].fftData.length) * 1000,
+            amplitude: point.amplitude || point.value || point.amp || 0
+          }));
+        } else {
+          // No FFT data available
+          fftData[axis] = [];
+        }
+      } else {
+        // No real data available - use placeholder values
+        metrics[axis] = {
+          vel: '-',
+          acc: '-',
+          env: '-',
+          temp: '-'
+        };
+        fftData[axis] = []; // Empty FFT when no real data
+      }
+    });
     
     return {
-      bearingName,
-      date,
-      sr: 20000,
-      metrics: {
-        H: { 
-          vel: (baseVel + Math.random() * 0.5).toFixed(2), 
-          acc: (baseAcc + Math.random() * 0.1).toFixed(3), 
-          env: (baseEnv + Math.random() * 0.05).toFixed(3) 
-        },
-        V: { 
-          vel: (baseVel + Math.random() * 0.8).toFixed(2), 
-          acc: (baseAcc + Math.random() * 0.15).toFixed(3), 
-          env: (baseEnv + Math.random() * 0.08).toFixed(3) 
-        },
-        A: { 
-          vel: (baseVel + Math.random() * 0.3).toFixed(2), 
-          acc: (baseAcc + Math.random() * 0.08).toFixed(3), 
-          env: (baseEnv + Math.random() * 0.03).toFixed(3) 
-        }
-      },
-      // Generate FFT data points
-      fftData: {
-        H: generateFFTData(200, statusMultiplier),
-        V: generateFFTData(200, statusMultiplier),
-        A: generateFFTData(200, statusMultiplier)
-      }
+      bearingName: bearing.bearingName,
+      date: bearing.date,
+      sr: bearing.sr,
+      status: bearing.status,
+      metrics,
+      fftData
     };
   });
 };
 
-// Generate FFT-like frequency data
-const generateFFTData = (numPoints, amplitudeMultiplier = 1) => {
-  const data = [];
-  for (let i = 0; i < numPoints; i++) {
-    const freq = (i / numPoints) * 1000; // 0-1000 Hz
-    // Create peaks at certain frequencies to simulate real FFT
-    let amplitude = Math.random() * 0.02 * amplitudeMultiplier;
-    
-    // Add characteristic peaks
-    if (Math.abs(freq - 50) < 5) amplitude += 0.3 * amplitudeMultiplier; // 1x RPM peak
-    if (Math.abs(freq - 100) < 5) amplitude += 0.15 * amplitudeMultiplier; // 2x
-    if (Math.abs(freq - 150) < 5) amplitude += 0.08 * amplitudeMultiplier; // 3x
-    if (Math.abs(freq - 180) < 10) amplitude += 0.05 * amplitudeMultiplier; // bearing freq
-    if (Math.abs(freq - 360) < 10) amplitude += 0.03 * amplitudeMultiplier; // 2x bearing
-    
-    data.push({ freq, amplitude });
-  }
-  return data;
+// No random FFT generation - only use real data from API
+
+// Return empty structure with "No data available" flag when API fails
+const generateNoDataBearingData = () => {
+  return [];
 };
 
 const ReportGenerator = ({ machine, onGenerateStart, onGenerateEnd }) => {
@@ -203,6 +363,11 @@ const ReportGenerator = ({ machine, onGenerateStart, onGenerateEnd }) => {
         const y2 = y + height - 5 - fftData[i].amplitude * scaleY;
         pdf.line(x1, y1, x2, y2);
       }
+    } else {
+      // Show "No data available" message
+      pdf.setFontSize(12);
+      pdf.setTextColor(150, 150, 150);
+      pdf.text('No data available', x + width / 2, y + height / 2, { align: 'center' });
     }
     
     // X-axis label
@@ -230,8 +395,38 @@ const ReportGenerator = ({ machine, onGenerateStart, onGenerateEnd }) => {
       // Load logo
       const logo = await loadLogo();
       
-      // Generate bearing data
-      const bearingsData = generateMockBearingData(machine);
+      // Try to fetch real machine data with bearings
+      let bearingsData = [];
+      let machineData = machine;
+      let hasRealData = false;
+      
+      try {
+        console.log('[ReportGenerator] Fetching real machine data for:', machine.machineId || machine.id);
+        const machineResponse = await fetchMachineById(machine.machineId || machine.id);
+        
+        if (machineResponse && machineResponse.machine) {
+          machineData = { ...machine, ...machineResponse.machine };
+          const realBearings = machineResponse.machine.bearings || [];
+          
+          if (realBearings.length > 0) {
+            console.log('[ReportGenerator] Found', realBearings.length, 'bearings, fetching data...');
+            const rawBearingData = await fetchRealBearingData(
+              machine.machineId || machine.id, 
+              realBearings,
+              machine.type
+            );
+            bearingsData = processBearingDataForReport(rawBearingData);
+            hasRealData = bearingsData.length > 0;
+            console.log('[ReportGenerator] Using real bearing data');
+          } else {
+            console.log('[ReportGenerator] No bearings found in machine data');
+          }
+        } else {
+          console.log('[ReportGenerator] No machine data returned from API');
+        }
+      } catch (fetchErr) {
+        console.warn('[ReportGenerator] Failed to fetch real data:', fetchErr);
+      }
       
       // Create PDF (A4 size)
       const pdf = new jsPDF('p', 'mm', 'a4');
@@ -275,7 +470,7 @@ const ReportGenerator = ({ machine, onGenerateStart, onGenerateEnd }) => {
       const severityLevels = [
         { code: 'A', level: 1, title: 'Severity level 1:', desc: 'Overall vibration value is within the acceptable range. This level is considered to be normal. No Maintenance action is required.', color: [16, 185, 129] },
         { code: 'B', level: 2, title: 'Severity level 2:', desc: 'This level is considered as satisfactory. Maintenance action may not be necessary. Equipment can be kept under continues operation.', color: [6, 182, 212] },
-        { code: 'C', level: 3, title: 'Severity level 3:', desc: "This level is considered 'Unsatisfactory', there has been an increase in the vibration and indicates problem in the machine. Maintenance action can be taken during equipment availability / Planned shutdown.", color: [245, 158, 11] },
+        { code: 'C', level: 3, title: 'Severity level 3:', desc: "This level is considered 'Unacceptable', there has been an increase in the vibration and indicates problem in the machine. Maintenance action can be taken during equipment availability / Planned shutdown.", color: [245, 158, 11] },
         { code: 'D', level: 4, title: 'Severity level 4:', desc: "This level is considered 'Unacceptable', There has been predominant increases in vibration trend and indicates problem in the equipment. Required immediate Maintenance action.", color: [239, 68, 68] }
       ];
       
@@ -659,101 +854,128 @@ const ReportGenerator = ({ machine, onGenerateStart, onGenerateEnd }) => {
       
       yPos += rowHeight;
       
-      // Table data rows
-      bearingsData.forEach((bearing, bIdx) => {
-        ['H', 'V', 'A'].forEach((axis, aIdx) => {
-          tableX = margin;
-          const metrics = bearing.metrics[axis];
-          const rowData = [
-            aIdx === 0 ? bearing.bearingName : '',
-            aIdx === 0 ? bearing.date : '',
-            axis,
-            metrics.vel,
-            metrics.acc,
-            metrics.env,
-            '-'
-          ];
-          
-          const bgColor = bIdx % 2 === 0 ? [255, 255, 255] : [248, 250, 252];
-          
-          colWidths.forEach((w, i) => {
-            pdf.setFillColor(...bgColor);
-            pdf.rect(tableX, yPos, w, rowHeight, 'F');
-            pdf.setDrawColor(226, 232, 240);
-            pdf.rect(tableX, yPos, w, rowHeight, 'S');
+      // Table data rows - only show if we have real data
+      if (bearingsData.length > 0) {
+        bearingsData.forEach((bearing, bIdx) => {
+          ['H', 'V', 'A'].forEach((axis, aIdx) => {
+            tableX = margin;
+            const metrics = bearing.metrics[axis];
+            const rowData = [
+              aIdx === 0 ? bearing.bearingName : '',
+              aIdx === 0 ? bearing.date : '',
+              axis,
+              metrics.vel || 'No data',
+              metrics.acc || 'No data',
+              metrics.env || 'No data',
+              metrics.temp || 'No data'
+            ];
             
-            // Color code velocity values
-            if (i === 3) {
-              const velColor = getVelocityColor(rowData[i]);
-              pdf.setTextColor(...velColor);
-            } else {
-              pdf.setTextColor(30, 41, 59);
-            }
+            const bgColor = bIdx % 2 === 0 ? [255, 255, 255] : [248, 250, 252];
             
-            pdf.setFontSize(7);
-            pdf.setFont('helvetica', 'normal');
-            pdf.text(rowData[i], tableX + 2, yPos + 5);
-            tableX += w;
+            colWidths.forEach((w, i) => {
+              pdf.setFillColor(...bgColor);
+              pdf.rect(tableX, yPos, w, rowHeight, 'F');
+              pdf.setDrawColor(226, 232, 240);
+              pdf.rect(tableX, yPos, w, rowHeight, 'S');
+              
+              // Color code velocity values (only if it's a number)
+              if (i === 3 && !isNaN(parseFloat(rowData[i]))) {
+                const velColor = getVelocityColor(rowData[i]);
+                pdf.setTextColor(...velColor);
+              } else if (rowData[i] === 'No data' || rowData[i] === '-') {
+                pdf.setTextColor(150, 150, 150);
+              } else {
+                pdf.setTextColor(30, 41, 59);
+              }
+              
+              pdf.setFontSize(7);
+              pdf.setFont('helvetica', 'normal');
+              pdf.text(rowData[i], tableX + 2, yPos + 5);
+              tableX += w;
+            });
+            
+            yPos += rowHeight;
           });
-          
-          yPos += rowHeight;
         });
-      });
+      } else {
+        // No data available - show message
+        yPos += 20;
+        pdf.setFontSize(14);
+        pdf.setTextColor(150, 150, 150);
+        pdf.text('No vibration data available from API', pageWidth / 2, yPos, { align: 'center' });
+        yPos += 10;
+        pdf.setFontSize(10);
+        pdf.text('Real-time data could not be retrieved for this machine.', pageWidth / 2, yPos, { align: 'center' });
+      }
 
       drawPageFooter(pdf, pageNum, pageWidth, pageHeight, margin);
       pageNum++;
       
       // ==================== PAGE 4+: FFT Charts ====================
-      // Generate FFT chart pages (2 charts per page)
-      const chartColors = {
-        H: [59, 130, 246],  // Blue
-        V: [16, 185, 129],  // Green
-        A: [245, 158, 11]   // Orange
-      };
-      
-      let chartIndex = 0;
-      bearingsData.forEach((bearing) => {
-        ['H', 'V', 'A'].forEach((axis) => {
-          // Start new page every 2 charts
-          if (chartIndex % 2 === 0) {
-            pdf.addPage();
-            yPos = 0;
-            drawPageHeader(pdf, logo, machine.machineName || machine.name, pageWidth, margin);
-            yPos = 28;
+      // Generate FFT chart pages only if we have real bearing data
+      if (bearingsData.length > 0) {
+        const chartColors = {
+          H: [59, 130, 246],  // Blue
+          V: [16, 185, 129],  // Green
+          A: [245, 158, 11]   // Orange
+        };
+        
+        let chartIndex = 0;
+        bearingsData.forEach((bearing) => {
+          ['H', 'V', 'A'].forEach((axis) => {
+            // Start new page every 2 charts
+            if (chartIndex % 2 === 0) {
+              pdf.addPage();
+              yPos = 0;
+              drawPageHeader(pdf, logo, machine.machineName || machine.name, pageWidth, margin);
+              yPos = 28;
+              
+              pdf.setTextColor(30, 41, 59);
+              pdf.setFontSize(9);
+              pdf.text(`Area Name: ${machine.areaId || 'N/A'}`, margin, yPos);
+              yPos += 8;
+            }
             
-            pdf.setTextColor(30, 41, 59);
-            pdf.setFontSize(9);
-            pdf.text(`Area Name: ${machine.areaId || 'N/A'}`, margin, yPos);
-            yPos += 8;
-          }
-          
-          const chartTitle = `FFT Series - ${bearing.bearingName} > Velocity > (${axis}-Axis) > ${bearing.date}`;
-          const chartYPos = chartIndex % 2 === 0 ? 45 : 145;
-          
-          drawFFTChart(
-            pdf, 
-            bearing.fftData[axis], 
-            margin + 5, 
-            chartYPos, 
-            contentWidth - 10, 
-            80, 
-            chartTitle,
-            chartColors[axis]
-          );
-          
-          // Description
-          pdf.setFontSize(7);
-          pdf.setTextColor(100, 100, 100);
-          pdf.text(`Description: ${bearing.bearingName}-${axis}`, margin + 5, chartYPos + 90);
-          
-          chartIndex++;
-          
-          if (chartIndex % 2 === 0 || chartIndex === bearingsData.length * 3) {
-            drawPageFooter(pdf, pageNum, pageWidth, pageHeight, margin);
-            pageNum++;
-          }
+            const chartTitle = `FFT Series - ${bearing.bearingName} > Velocity > (${axis}-Axis) > ${bearing.date}`;
+            const chartYPos = chartIndex % 2 === 0 ? 45 : 145;
+            
+            drawFFTChart(
+              pdf, 
+              bearing.fftData[axis], 
+              margin + 5, 
+              chartYPos, 
+              contentWidth - 10, 
+              80, 
+              chartTitle,
+              chartColors[axis]
+            );
+            
+            // Description
+            pdf.setFontSize(7);
+            pdf.setTextColor(100, 100, 100);
+            pdf.text(`Description: ${bearing.bearingName}-${axis}`, margin + 5, chartYPos + 90);
+            
+            chartIndex++;
+            
+            if (chartIndex % 2 === 0 || chartIndex === bearingsData.length * 3) {
+              drawPageFooter(pdf, pageNum, pageWidth, pageHeight, margin);
+              pageNum++;
+            }
+          });
         });
-      });
+      } else {
+        // No FFT data available - add a page with message
+        pdf.addPage();
+        drawPageHeader(pdf, logo, machine.machineName || machine.name, pageWidth, margin);
+        
+        pdf.setFontSize(14);
+        pdf.setTextColor(150, 150, 150);
+        pdf.text('No FFT Data Available', pageWidth / 2, 100, { align: 'center' });
+        pdf.setFontSize(10);
+        pdf.text('Real-time FFT data could not be retrieved from the API.', pageWidth / 2, 115, { align: 'center' });
+        
+        drawPageFooter(pdf, pageNum, pageWidth, pageHeight, margin);
+      }
       
       // Open PDF in new tab and trigger download
       const fileName = `Report_${(machine.machineName || machine.machineId || 'Machine').replace(/[^a-zA-Z0-9()-]/g, '_')}_${new Date().toISOString().split('T')[0]}.pdf`;

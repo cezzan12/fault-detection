@@ -11,8 +11,8 @@ const StatusBadge = ({ status }) => {
     normal: { label: 'Normal', className: 'badge-normal' },
     satisfactory: { label: 'Satisfactory', className: 'badge-satisfactory' },
     alert: { label: 'Alert', className: 'badge-alert' },
-    unacceptable: { label: 'Unsatisfactory', className: 'badge-unacceptable' },
-    unsatisfactory: { label: 'Unsatisfactory', className: 'badge-unacceptable' }
+    unacceptable: { label: 'Unacceptable', className: 'badge-unacceptable' },
+    unsatisfactory: { label: 'Unacceptable', className: 'badge-unacceptable' }
   };
 
   const normalizedStatus = (status || 'normal').toLowerCase();

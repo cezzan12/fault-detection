@@ -59,7 +59,7 @@ function App() {
   
   // Filter options states
   const [areaOptions, setAreaOptions] = useState(defaultAreaOptions);
-  const [statusOptions, setStatusOptions] = useState(['All', 'Normal', 'Satisfactory', 'Alert', 'Unsatisfactory']);
+  const [statusOptions, setStatusOptions] = useState(['All', 'Normal', 'Satisfactory', 'Alert', 'Unacceptable']);
   const [customerOptions, setCustomerOptions] = useState(defaultCustomerOptions);
 
   // Get today's date for default filters
