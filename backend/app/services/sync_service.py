@@ -87,11 +87,59 @@ async def sync_machines_for_date(db, date_str: str) -> dict:
         machine["date"] = date_str
         machine["synced_at"] = datetime.utcnow()
         
+        # Handle new API format where customer, areaId, subAreaId are nested objects
+        # Extract customer info - customer is now an array of objects with _id and name
+        customer_data = machine.get("customer", [])
+        if isinstance(customer_data, list) and len(customer_data) > 0:
+            first_customer = customer_data[0]
+            if isinstance(first_customer, dict):
+                machine["customerId"] = first_customer.get("_id", "N/A")
+                machine["customerName"] = first_customer.get("name", "N/A")
+            else:
+                machine["customerId"] = str(first_customer) if first_customer else "N/A"
+                machine["customerName"] = "N/A"
+        elif isinstance(customer_data, dict):
+            machine["customerId"] = customer_data.get("_id", "N/A")
+            machine["customerName"] = customer_data.get("name", "N/A")
+        else:
+            machine["customerId"] = machine.get("customerId", "N/A")
+            machine["customerName"] = machine.get("customerName", "N/A")
+        
+        # Handle areaId - now an object with _id and name
+        area_data = machine.get("areaId", {})
+        if isinstance(area_data, dict):
+            machine["areaIdRaw"] = area_data.get("_id", "N/A")
+            machine["areaName"] = area_data.get("name", "N/A")
+            # Keep areaId as the name for display, store raw ID separately
+            machine["areaId"] = area_data.get("name", area_data.get("_id", "N/A"))
+        elif isinstance(area_data, str):
+            machine["areaId"] = area_data if area_data else "N/A"
+            machine["areaName"] = area_data if area_data else "N/A"
+            machine["areaIdRaw"] = area_data if area_data else "N/A"
+        else:
+            machine["areaId"] = "N/A"
+            machine["areaName"] = "N/A"
+            machine["areaIdRaw"] = "N/A"
+        
+        # Handle subAreaId - now an object with _id and name
+        subarea_data = machine.get("subAreaId", {})
+        if isinstance(subarea_data, dict):
+            machine["subAreaIdRaw"] = subarea_data.get("_id", "N/A")
+            machine["subAreaName"] = subarea_data.get("name", "N/A")
+            # Keep subAreaId as the name for display
+            machine["subAreaId"] = subarea_data.get("name", subarea_data.get("_id", "N/A"))
+        elif isinstance(subarea_data, str):
+            machine["subAreaId"] = subarea_data if subarea_data else "N/A"
+            machine["subAreaName"] = subarea_data if subarea_data else "N/A"
+            machine["subAreaIdRaw"] = subarea_data if subarea_data else "N/A"
+        else:
+            machine["subAreaId"] = "N/A"
+            machine["subAreaName"] = "N/A"
+            machine["subAreaIdRaw"] = "N/A"
+        
         # Ensure required fields have default values
         required_fields = [
-            ("customerId", "N/A"),
             ("statusName", "N/A"),
-            ("areaId", "N/A"),
             ("dataUpdatedTime", "N/A"),
             ("name", ""),
         ]

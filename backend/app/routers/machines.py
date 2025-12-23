@@ -6,6 +6,15 @@ import asyncio
 import logging
 from datetime import datetime, timedelta, date as dt
 
+# Import FFT analysis service
+try:
+    from app.services.fft_analysis import perform_complete_analysis
+except ImportError:
+    try:
+        from services.fft_analysis import perform_complete_analysis
+    except ImportError:
+        perform_complete_analysis = None
+
 # Support both absolute and relative imports
 try:
     from app.database import get_database
@@ -410,17 +419,58 @@ async def get_machines(
                 pass
 
         # Ensure all required fields are present for every machine
-        required_fields = [
-            ("customerId", "N/A"),
-            ("statusName", "N/A"),
-            ("areaId", "N/A"),
-            ("dataUpdatedTime", "N/A"),
-            ("name", ""),
-        ]
+        # Also handle new API format where customer, areaId, subAreaId are nested objects
         for m in all_machines:
-            for field, default in required_fields:
-                if field not in m or m[field] in [None, ""]:
-                    m[field] = default
+            # Handle customer - now an array of objects with _id and name
+            customer_data = m.get("customer", [])
+            if isinstance(customer_data, list) and len(customer_data) > 0:
+                first_customer = customer_data[0]
+                if isinstance(first_customer, dict):
+                    m["customerId"] = first_customer.get("_id", "N/A")
+                    m["customerName"] = first_customer.get("name", "N/A")
+                else:
+                    m["customerId"] = str(first_customer) if first_customer else "N/A"
+                    m["customerName"] = "N/A"
+            elif isinstance(customer_data, dict):
+                m["customerId"] = customer_data.get("_id", "N/A")
+                m["customerName"] = customer_data.get("name", "N/A")
+            else:
+                m["customerId"] = m.get("customerId", "N/A")
+                m["customerName"] = m.get("customerName", "N/A")
+            
+            # Handle areaId - now an object with _id and name
+            area_data = m.get("areaId", {})
+            if isinstance(area_data, dict):
+                m["areaIdRaw"] = area_data.get("_id", "N/A")
+                m["areaName"] = area_data.get("name", "N/A")
+                m["areaId"] = area_data.get("name", area_data.get("_id", "N/A"))
+            elif isinstance(area_data, str):
+                m["areaId"] = area_data if area_data else "N/A"
+                m["areaName"] = area_data if area_data else "N/A"
+            else:
+                m["areaId"] = "N/A"
+                m["areaName"] = "N/A"
+            
+            # Handle subAreaId - now an object with _id and name
+            subarea_data = m.get("subAreaId", {})
+            if isinstance(subarea_data, dict):
+                m["subAreaIdRaw"] = subarea_data.get("_id", "N/A")
+                m["subAreaName"] = subarea_data.get("name", "N/A")
+                m["subAreaId"] = subarea_data.get("name", subarea_data.get("_id", "N/A"))
+            elif isinstance(subarea_data, str):
+                m["subAreaId"] = subarea_data if subarea_data else "N/A"
+                m["subAreaName"] = subarea_data if subarea_data else "N/A"
+            else:
+                m["subAreaId"] = "N/A"
+                m["subAreaName"] = "N/A"
+            
+            # Set default values for remaining required fields
+            if "statusName" not in m or m["statusName"] in [None, ""]:
+                m["statusName"] = "N/A"
+            if "dataUpdatedTime" not in m or m["dataUpdatedTime"] in [None, ""]:
+                m["dataUpdatedTime"] = "N/A"
+            if "name" not in m or m["name"] in [None, ""]:
+                m["name"] = ""
             
             # Handle type/machineType - check machineType first (contains online/offline)
             if "machineType" in m and m["machineType"] not in [None, "", "N/A"]:
@@ -593,3 +643,255 @@ async def get_machine_bearing_data(
     except Exception as e:
         logging.exception(f"Failed to fetch bearing data {bearing_id}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# ------------------- 4️⃣ FFT Analysis (All Axes) -------------------
+@router.get("/machines/fft-analysis/{machine_id}/{bearing_id}")
+@router.post("/machines/fft-analysis/{machine_id}/{bearing_id}")
+async def get_fft_analysis(
+    machine_id: str,
+    bearing_id: str,
+    data_type: Optional[str] = Query("OFFLINE", description="Data type: ONLINE or OFFLINE"),
+    machine_class: Optional[str] = Query("II", description="ISO machine class: I, II, III, IV")
+):
+    """
+    Perform comprehensive FFT analysis on bearing vibration data for all axes (H, V, A).
+    
+    Returns:
+    - FFT spectrum for each axis
+    - Peak detection at 1× running frequency (±5% tolerance)
+    - Harmonic detection (1×-10× running frequency)
+    - ISO 10816-3 severity assessment
+    - Fault diagnosis with recommendations
+    """
+    # Add verbose logging for debugging
+    print(f"[FFT] Starting analysis for machine={machine_id}, bearing={bearing_id}")
+    logging.info(f"[FFT] Starting analysis for machine={machine_id}, bearing={bearing_id}, type={data_type}")
+    
+    if perform_complete_analysis is None:
+        logging.error("[FFT] perform_complete_analysis is None - numpy not available?")
+        print("[FFT] ERROR: perform_complete_analysis is None")
+        raise HTTPException(
+            status_code=500, 
+            detail="FFT analysis service not available. Please install numpy."
+        )
+    
+    try:
+        axes = ['H-Axis', 'V-Axis', 'A-Axis']
+        axis_results = {}
+        rpm = None
+        sample_rate = None
+        
+        async with httpx.AsyncClient(timeout=60) as client:
+            for axis in axes:
+                payload = {
+                    "machineId": machine_id,
+                    "bearingLocationId": bearing_id,
+                    "Axis_Id": axis,
+                    "type": data_type,
+                    "Analytics_Types": "MF"
+                }
+                
+                # Log the API request (flush=True for immediate output in cmd)
+                print(f"\n{'='*60}", flush=True)
+                print(f"[FFT API] Fetching {axis} data", flush=True)
+                print(f"[FFT API] URL: {DATA_URL}", flush=True)
+                print(f"[FFT API] Request: machineId={machine_id}, bearingId={bearing_id}, axis={axis}, type={data_type}", flush=True)
+                
+                try:
+                    response = await client.post(DATA_URL, headers=HEADERS, json=payload)
+                    
+                    # Log the response
+                    print(f"[FFT API] Response Status: {response.status_code}", flush=True)
+                    
+                    if response.status_code != 200:
+                        print(f"[FFT API] ❌ ERROR: API returned {response.status_code} for {axis}", flush=True)
+                        logging.warning(f"API returned {response.status_code} for {axis}")
+                        axis_results[axis] = {
+                            'error': f'API error: {response.status_code}',
+                            'available': False
+                        }
+                        continue
+                    
+                    data = response.json()
+                    
+                    # Log received data
+                    print(f"[FFT API] ✓ Data received: RPM={data.get('rpm')}, SR={data.get('SR')}, rawData points={len(data.get('rawData', []))}", flush=True)
+                    
+                    # Extract required fields
+                    raw_data = data.get('rawData', [])
+                    axis_rpm = data.get('rpm')
+                    axis_sr = data.get('SR')
+                    
+                    # Parse sample rate
+                    if axis_sr:
+                        try:
+                            sample_rate = float(axis_sr)
+                        except (ValueError, TypeError):
+                            sample_rate = 10000.0  # Default
+                    else:
+                        sample_rate = 10000.0
+                    
+                    # Parse RPM
+                    if axis_rpm:
+                        try:
+                            rpm = float(axis_rpm)
+                        except (ValueError, TypeError):
+                            pass
+                    
+                    # Check for valid data
+                    if not raw_data or len(raw_data) < 100:
+                        logging.warning(f"Insufficient data for {axis}: {len(raw_data) if raw_data else 0} points")
+                        axis_results[axis] = {
+                            'error': 'Insufficient vibration data',
+                            'available': False
+                        }
+                        continue
+                    
+                    if not rpm or rpm <= 0:
+                        logging.warning(f"Invalid RPM for {axis}: {rpm}")
+                        axis_results[axis] = {
+                            'error': 'RPM not available - cannot analyze',
+                            'available': False
+                        }
+                        continue
+                    
+                    # Parse raw data (handle various formats)
+                    if isinstance(raw_data, str):
+                        # String format: comma-separated values
+                        raw_data = [float(x.strip()) for x in raw_data.split(',') if x.strip()]
+                    elif isinstance(raw_data, list):
+                        # List format: convert all elements to float
+                        parsed_data = []
+                        for x in raw_data:
+                            try:
+                                if isinstance(x, str):
+                                    parsed_data.append(float(x.strip()))
+                                elif isinstance(x, (int, float)):
+                                    parsed_data.append(float(x))
+                                else:
+                                    parsed_data.append(float(x))
+                            except (ValueError, TypeError):
+                                continue
+                        raw_data = parsed_data
+                    
+                    if len(raw_data) < 100:
+                        logging.warning(f"After parsing, insufficient data for {axis}: {len(raw_data)} points")
+                        axis_results[axis] = {
+                            'error': 'Insufficient valid data points after parsing',
+                            'available': False
+                        }
+                        continue
+                    
+                    logging.info(f"Performing FFT analysis for {axis}: {len(raw_data)} points, RPM={rpm}, SR={sample_rate}")
+                    
+                    # Perform FFT analysis
+                    axis_short = axis.replace('-Axis', '')
+                    analysis = perform_complete_analysis(
+                        raw_data=raw_data,
+                        sample_rate=sample_rate,
+                        rpm=rpm,
+                        axis=axis_short,
+                        machine_class=machine_class
+                    )
+                    
+                    axis_results[axis] = {
+                        'available': True,
+                        **analysis
+                    }
+                    
+                except Exception as axis_err:
+                    logging.exception(f"Error processing {axis}: {axis_err}")
+                    axis_results[axis] = {
+                        'error': str(axis_err),
+                        'available': False
+                    }
+        
+            # Fetch external bearing status from BearingLocation API
+            external_status = None
+            print(f"\n{'='*60}")
+            print(f"[FFT API] Fetching external bearing status...")
+            print(f"[FFT API] URL: {BEARING_URL}")
+            print(f"[FFT API] Request: machineId={machine_id}")
+            try:
+                bearing_response = await client.post(
+                    BEARING_URL, 
+                    headers=HEADERS, 
+                    json={"machineId": machine_id}
+                )
+                print(f"[FFT API] BearingLocation Response Status: {bearing_response.status_code}", flush=True)
+                if bearing_response.status_code == 200:
+                    bearings_data = bearing_response.json()
+                    print(f"[FFT API] Found {len(bearings_data)} bearings for machine", flush=True)
+                    # Find the specific bearing
+                    for b in bearings_data:
+                        if b.get('_id') == bearing_id:
+                            external_status = b.get('statusName', 'Unknown')
+                            print(f"[FFT API] ✓ External status for bearing {bearing_id[-8:]}: {external_status}", flush=True)
+                            logging.info(f"Found external status for bearing {bearing_id}: {external_status}")
+                            break
+                    if not external_status:
+                        print(f"[FFT API] ⚠ Bearing {bearing_id[-8:]} not found in BearingLocation response", flush=True)
+            except Exception as e:
+                print(f"[FFT API] ❌ Failed to fetch external status: {e}", flush=True)
+                logging.warning(f"Failed to fetch external bearing status: {e}")
+        
+        print(f"\n{'='*60}", flush=True)
+        print(f"[FFT API] Analysis complete for machine={machine_id[-8:]}, bearing={bearing_id[-8:]}", flush=True)
+        print(f"[FFT API] Axes available: {[axis for axis, r in axis_results.items() if r.get('available')]}", flush=True)
+        print(f"[FFT API] External Status: {external_status}", flush=True)
+        print(f"{'='*60}\n", flush=True)
+        
+        # Determine overall severity (worst case across axes)
+        overall_severity = None
+        severity_order = ['A', 'B', 'C', 'D']
+        
+        for axis, result in axis_results.items():
+            if result.get('available') and result.get('severity'):
+                zone = result['severity'].get('zone', 'A')
+                if overall_severity is None:
+                    overall_severity = result['severity']
+                elif severity_order.index(zone) > severity_order.index(overall_severity.get('zone', 'A')):
+                    overall_severity = result['severity']
+        
+        # Determine overall diagnosis (combine evidence from all axes)
+        overall_diagnosis = None
+        all_evidence = []
+        max_harmonic_count = 0
+        
+        for axis, result in axis_results.items():
+            if result.get('available') and result.get('diagnosis'):
+                diag = result['diagnosis']
+                all_evidence.extend(diag.get('evidence', []))
+                max_harmonic_count = max(max_harmonic_count, diag.get('harmonicCount', 0))
+                
+                # Use the diagnosis with highest confidence
+                if overall_diagnosis is None:
+                    overall_diagnosis = diag
+                elif diag.get('confidence') == 'High' and overall_diagnosis.get('confidence') != 'High':
+                    overall_diagnosis = diag
+        
+        if overall_diagnosis:
+            overall_diagnosis['evidence'] = list(set(all_evidence))[:5]  # Unique evidence, max 5
+            overall_diagnosis['harmonicCount'] = max_harmonic_count
+        
+        return {
+            'success': True,
+            'machineId': machine_id,
+            'bearingId': bearing_id,
+            'machineClass': machine_class,
+            'rpm': rpm,
+            'runningFrequency': round(rpm / 60.0, 2) if rpm else None,
+            'sampleRate': sample_rate,
+            'axisData': axis_results,
+            'overallSeverity': overall_severity,
+            'overallDiagnosis': overall_diagnosis,
+            'externalStatus': external_status  # Status from AAMS BearingLocation API
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logging.exception(f"FFT analysis failed for {machine_id}/{bearing_id}")
+        raise HTTPException(status_code=500, detail=f"FFT analysis failed: {str(e)}")
+

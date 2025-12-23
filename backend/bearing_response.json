@@ -1,0 +1,134 @@
+[
+  {
+    "_id": "664dbfc35c3f971b7253a321",
+    "bearingLocationType": "OFFLINE",
+    "machineId": "664dbfaf5c3f971b7253a319",
+    "statusId": "64dfb45a752b93e87d0cec2e",
+    "statusName": "Normal",
+    "velocity": {
+      "_id": "68524a451fb68ddff02c7134",
+      "calibrationValue": {
+        "_id": "68524a451fb68ddff02c7135",
+        "a": 1,
+        "h": 1,
+        "v": 1
+      },
+      "floorNoiseAttenuationFacter": {
+        "_id": "685243681fb68ddff02c3fb0",
+        "a": 4,
+        "h": 4,
+        "v": 4
+      },
+      "floorNoiseThresholdPercentage": {
+        "_id": "685243681fb68ddff02c3faf",
+        "a": 0.4,
+        "h": 0.4,
+        "v": 0.4
+      },
+      "highpassCutoffFrequency": 2,
+      "highpassCutoffFrequencyFft": 2,
+      "highpassFilterRequired": false,
+      "highpassOrder": 4,
+      "highpassOrderFft": 4
+    }
+  },
+  {
+    "_id": "664dbfc35c3f971b7253a32a",
+    "bearingLocationType": "OFFLINE",
+    "machineId": "664dbfaf5c3f971b7253a319",
+    "statusId": "64dfb45a752b93e87d0cec2e",
+    "statusName": "Normal",
+    "velocity": {
+      "_id": "68524a451fb68ddff02c7134",
+      "calibrationValue": {
+        "_id": "68524a451fb68ddff02c7135",
+        "a": 1,
+        "h": 1,
+        "v": 1
+      },
+      "floorNoiseAttenuationFacter": {
+        "_id": "685243681fb68ddff02c3fb0",
+        "a": 4,
+        "h": 4,
+        "v": 4
+      },
+      "floorNoiseThresholdPercentage": {
+        "_id": "685243681fb68ddff02c3faf",
+        "a": 0.4,
+        "h": 0.4,
+        "v": 0.4
+      },
+      "highpassCutoffFrequency": 2,
+      "highpassCutoffFrequencyFft": 2,
+      "highpassFilterRequired": false,
+      "highpassOrder": 4,
+      "highpassOrderFft": 4
+    }
+  },
+  {
+    "_id": "664dbfc35c3f971b7253a333",
+    "bearingLocationType": "OFFLINE",
+    "machineId": "664dbfaf5c3f971b7253a319",
+    "statusId": "64dfb45a752b93e87d0cec2e",
+    "statusName": "Normal",
+    "velocity": {
+      "_id": "68524a451fb68ddff02c7134",
+      "calibrationValue": {
+        "_id": "68524a451fb68ddff02c7135",
+        "a": 1,
+        "h": 1,
+        "v": 1
+      },
+      "floorNoiseAttenuationFacter": {
+        "_id": "685243681fb68ddff02c3fb0",
+        "a": 4,
+        "h": 4,
+        "v": 4
+      },
+      "floorNoiseThresholdPercentage": {
+        "_id": "685243681fb68ddff02c3faf",
+        "a": 0.4,
+        "h": 0.4,
+        "v": 0.4
+      },
+      "highpassCutoffFrequency": 2,
+      "highpassCutoffFrequencyFft": 2,
+      "highpassFilterRequired": false,
+      "highpassOrder": 4,
+      "highpassOrderFft": 4
+    }
+  },
+  {
+    "_id": "664dbfe75c3f971b7253a35d",
+    "bearingLocationType": "OFFLINE",
+    "machineId": "664dbfaf5c3f971b7253a319",
+    "statusId": "64dfb45a752b93e87d0cec2e",
+    "statusName": "Normal",
+    "velocity": {
+      "_id": "68524a451fb68ddff02c7134",
+      "calibrationValue": {
+        "_id": "68524a451fb68ddff02c7135",
+        "a": 1,
+        "h": 1,
+        "v": 1
+      },
+      "floorNoiseAttenuationFacter": {
+        "_id": "685243681fb68ddff02c3fb0",
+        "a": 4,
+        "h": 4,
+        "v": 4
+      },
+      "floorNoiseThresholdPercentage": {
+        "_id": "685243681fb68ddff02c3faf",
+        "a": 0.4,
+        "h": 0.4,
+        "v": 0.4
+      },
+      "highpassCutoffFrequency": 2,
+      "highpassCutoffFrequencyFft": 2,
+      "highpassFilterRequired": false,
+      "highpassOrder": 4,
+      "highpassOrderFft": 4
+    }
+  }
+]

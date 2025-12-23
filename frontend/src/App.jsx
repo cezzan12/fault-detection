@@ -31,7 +31,7 @@ function App() {
   const [activePage, setActivePage] = useState('dashboard');
   const [selectedMachine, setSelectedMachine] = useState(null);
   const [syncStatus, setSyncStatus] = useState(null);
-  
+
   // Loading states
   const [loading, setLoading] = useState({
     kpi: false,
@@ -56,7 +56,7 @@ function App() {
   const [statusTrendData, setStatusTrendData] = useState(defaultStatusTrendData);
   const [machinesData, setMachinesData] = useState(defaultMachinesData);
   const [rawMachinesData, setRawMachinesData] = useState([]); // Store raw data for filtering
-  
+
   // Filter options states
   const [areaOptions, setAreaOptions] = useState(defaultAreaOptions);
   const [statusOptions, setStatusOptions] = useState(['All', 'Normal', 'Satisfactory', 'Alert', 'Unacceptable']);
@@ -107,32 +107,36 @@ function App() {
 
     try {
       // Fetch machines with date range and filters
+      // Limit to 500 for dashboard to prevent performance issues
       const response = await fetchMachines({
         date_from: filters.fromDate,
         date_to: filters.toDate,
         status: filters.status,
-        customerId: filters.customerId
+        customerId: filters.customerId,
+        limit: 500
       });
 
       let machines = response.machines || [];
       console.log(`[Dashboard] Fetched ${machines.length} machines from ${response.source || 'api'}`);
 
-      // Calculate KPI from machines
-      const kpi = calculateKpiFromMachines(machines);
-      setKpiData(kpi);
+      // Use setTimeout to defer heavy processing and prevent UI blocking
+      setTimeout(() => {
+        // Calculate KPI from machines
+        const kpi = calculateKpiFromMachines(machines);
+        setKpiData(kpi);
 
-      // Generate customer trend data
-      const customerTrends = generateCustomerTrendData(machines);
-      setCustomerTrendData(customerTrends);
+        // Generate trend data (limited processing)
+        const customerTrends = generateCustomerTrendData(machines.slice(0, 200));
+        setCustomerTrendData(customerTrends);
 
-      // Generate status trend data
-      const statusTrends = generateStatusTrendData(machines);
-      setStatusTrendData(statusTrends);
+        const statusTrends = generateStatusTrendData(machines.slice(0, 200));
+        setStatusTrendData(statusTrends);
 
-      // Extract filter options
-      const filterOpts = extractFilterOptions(machines);
-      setAreaOptions(filterOpts.areaOptions);
-      setCustomerOptions(filterOpts.customerOptions);
+        // Extract filter options
+        const filterOpts = extractFilterOptions(machines);
+        setAreaOptions(filterOpts.areaOptions);
+        setCustomerOptions(filterOpts.customerOptions);
+      }, 0);
 
     } catch (error) {
       console.error('Failed to fetch dashboard data:', error);
@@ -165,7 +169,7 @@ function App() {
         date_from: filters.fromDate,
         date_to: filters.toDate
       };
-      
+
       // Only add filters if they are not 'All'
       if (filters.customerId && filters.customerId !== 'All') {
         apiFilters.customerId = filters.customerId;
@@ -176,26 +180,71 @@ function App() {
       if (filters.status && filters.status !== 'All') {
         apiFilters.status = filters.status;
       }
-      
+
       console.log('[fetchMachinesData] API filters:', apiFilters);
-      
+
       const response = await fetchMachines(apiFilters);
 
       const machines = response.machines || [];
       console.log(`[Machines] Fetched ${machines.length} machines from ${response.source || 'api'}`);
 
       // Transform machines data for the table
-      const transformedData = machines.map((machine, index) => ({
-        id: machine._id || machine.machineId || `machine-${index}`,
-        customerId: machine.customerId || 'N/A',
-        machineName: machine.name || machine.machineName || 'Unknown',
-        machineId: machine.machineId || machine._id || 'N/A',
-        status: (machine.statusName || machine.status || 'normal').toLowerCase(),
-        type: (machine.machineType && machine.machineType !== 'N/A' ? machine.machineType : machine.type || 'OFFLINE').toUpperCase(),
-        areaId: machine.areaId || 'N/A',
-        subareaId: machine.subAreaId || 'N/A',
-        date: machine.dataUpdatedTime ? machine.dataUpdatedTime.split('T')[0] : 'N/A'
-      }));
+      // IMPORTANT: machineId is the external API ID, _id is MongoDB record ID
+      // The backend expects the external machineId for fetching bearings
+      // Handle new API format where customer, areaId, subAreaId are nested objects
+      const transformedData = machines.map((machine, index) => {
+        // Extract customer name from new format (array of objects with _id and name)
+        let customerName = 'N/A';
+        let customerId = 'N/A';
+        const customerData = machine.customer;
+        if (Array.isArray(customerData) && customerData.length > 0) {
+          const firstCustomer = customerData[0];
+          if (typeof firstCustomer === 'object') {
+            customerName = firstCustomer.name || 'N/A';
+            customerId = firstCustomer._id || 'N/A';
+          }
+        } else if (typeof customerData === 'object' && customerData !== null) {
+          customerName = customerData.name || 'N/A';
+          customerId = customerData._id || 'N/A';
+        }
+        // Fallback to direct fields (from MongoDB after sync)
+        customerName = customerName !== 'N/A' ? customerName : (machine.customerName || machine.customerId || 'N/A');
+        customerId = customerId !== 'N/A' ? customerId : (machine.customerId || 'N/A');
+
+        // Extract area name from new format (object with _id and name)
+        let areaName = 'N/A';
+        const areaData = machine.areaId;
+        if (typeof areaData === 'object' && areaData !== null) {
+          areaName = areaData.name || areaData._id || 'N/A';
+        } else {
+          areaName = machine.areaName || machine.areaId || 'N/A';
+        }
+
+        // Extract subarea name from new format
+        let subareaName = 'N/A';
+        const subAreaData = machine.subAreaId;
+        if (typeof subAreaData === 'object' && subAreaData !== null) {
+          subareaName = subAreaData.name || subAreaData._id || 'N/A';
+        } else {
+          subareaName = machine.subAreaName || machine.subAreaId || 'N/A';
+        }
+
+        return {
+          id: machine._id || machine.machineId || `machine-${index}`,
+          customerId: customerId,
+          customerName: customerName, // Add customer name for display
+          machineName: machine.name || machine.machineName || 'Unknown',
+          // Use machineId for the external API (this is what BearingLocation API expects)
+          machineId: machine.machineId || machine._id || 'N/A',
+          // Also keep _id for reference
+          _id: machine._id || null,
+          status: (machine.statusName || machine.status || 'normal').toLowerCase(),
+          type: (machine.machineType && machine.machineType !== 'N/A' ? machine.machineType : machine.type || 'OFFLINE').toUpperCase(),
+          areaId: areaName,  // Display area name
+          subareaId: subareaName,  // Display subarea name
+          date: machine.date || (machine.dataUpdatedTime ? new Date(machine.dataUpdatedTime).toISOString().split('T')[0] : 'N/A')
+        };
+      });
 
       setMachinesData(transformedData);
       setRawMachinesData(transformedData);
@@ -217,44 +266,34 @@ function App() {
   // EFFECTS
   // ==========================================
 
-  // Auto-sync on initial load to keep data updated
+  // Auto-sync on initial load to keep data updated (data fetch handled by filter useEffects)
   useEffect(() => {
     const performAutoSync = async () => {
       console.log('[App] Triggering auto-sync to check for updates...');
-      const result = await triggerAutoSync();
-      console.log('[App] Auto-sync result:', result);
-      setSyncStatus(result);
-      
-      // If sync was triggered, refetch data after a short delay
-      if (result.needs_sync) {
-        console.log('[App] Sync in progress, will refresh data in 3 seconds...');
-        setTimeout(() => {
-          fetchDashboardData(dashboardFilters);
-          fetchMachinesData(machineFilters);
-        }, 3000);
+      try {
+        const result = await triggerAutoSync();
+        console.log('[App] Auto-sync result:', result);
+        setSyncStatus(result);
+        // Note: Data refetch is handled by the filter useEffects, not here
+      } catch (err) {
+        console.warn('[App] Auto-sync error (non-blocking):', err);
       }
     };
-    
+
     performAutoSync();
-    
+
     // Also set up periodic sync check every 4 minutes
     const syncInterval = setInterval(performAutoSync, 4 * 60 * 1000);
-    
+
     return () => clearInterval(syncInterval);
   }, []);
 
-  // Initial data load
-  useEffect(() => {
-    fetchDashboardData(dashboardFilters);
-    fetchMachinesData(machineFilters);
-  }, []);
-
-  // Refetch dashboard data when filters change
+  // Refetch dashboard data when filters change (also handles initial load)
   useEffect(() => {
     fetchDashboardData(dashboardFilters);
   }, [dashboardFilters, fetchDashboardData]);
 
-  // Refetch machines when filters change
+  // Refetch machines when filters change (also handles initial load)
   useEffect(() => {
     fetchMachinesData(machineFilters);
   }, [machineFilters, fetchMachinesData]);
@@ -312,24 +351,24 @@ function App() {
   return (
     <div className="app">
       <Header activePage={activePage} onPageChange={handlePageChange} />
-      
+
       {activePage === 'dashboard' && (
-        <PageContainer 
-          title="Dashboard Overview" 
+        <PageContainer
+          title="Dashboard Overview"
           subtitle="Real-time factory monitoring and machine health analytics"
         >
-          <DateFilterBar 
+          <DateFilterBar
             onApplyFilter={handleDashboardFilterApply}
             statusOptions={statusOptions}
             customerOptions={customerOptions}
             initialFilters={dashboardFilters}
           />
-          <KpiCardsRow 
-            data={kpiData} 
-            loading={loading.kpi} 
-            error={errors.kpi} 
+          <KpiCardsRow
+            data={kpiData}
+            loading={loading.kpi}
+            error={errors.kpi}
           />
-          <ChartsSection 
+          <ChartsSection
             customerTrendData={customerTrendData}
             statusTrendData={statusTrendData}
             loading={{
@@ -346,11 +385,11 @@ function App() {
       )}
 
       {activePage === 'machines' && !selectedMachine && (
-        <PageContainer 
-          title="Machine Inventory" 
+        <PageContainer
+          title="Machine Inventory"
           subtitle="View and manage all factory machines"
         >
-          <MachineFilterBar 
+          <MachineFilterBar
             onApplyFilter={handleMachineFilterApply}
             areaOptions={areaOptions}
             statusOptions={statusOptions}
@@ -358,8 +397,8 @@ function App() {
             initialFilters={machineFilters}
             machinesData={machinesData}
           />
-          <MachinesTable 
-            data={machinesData} 
+          <MachinesTable
+            data={machinesData}
             filters={machineFilters}
             loading={loading.machines}
             error={errors.machines}
@@ -369,11 +408,11 @@ function App() {
       )}
 
       {activePage === 'machines' && selectedMachine && (
-        <PageContainer 
-          title="Machine Details" 
+        <PageContainer
+          title="Machine Details"
           subtitle="Detailed machine information and bearing data"
         >
-          <MachineDetail 
+          <MachineDetail
             machineId={selectedMachine.machineId || selectedMachine.id}
             machineInfo={selectedMachine}
             onBack={() => setSelectedMachine(null)}
