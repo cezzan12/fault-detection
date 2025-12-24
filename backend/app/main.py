@@ -4,14 +4,36 @@ from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.base import BaseHTTPMiddleware
 from contextlib import asynccontextmanager
 import time
+import asyncio
 
 # Support both absolute and relative imports
 try:
     from app.routers import machines, stats, sync
-    from app.database import connect_to_database, close_database_connection
+    from app.database import connect_to_database, close_database_connection, get_database
+    from app.services.sync_service import sync_last_n_days
 except ImportError:
     from routers import machines, stats, sync
-    from database import connect_to_database, close_database_connection
+    from database import connect_to_database, close_database_connection, get_database
+    from services.sync_service import sync_last_n_days
+
+
+# ------------------- Auto-Sync on Startup -------------------
+async def auto_sync_on_startup():
+    """
+    Automatically sync recent data when server starts.
+    Syncs last 2 days to ensure today's data is always available.
+    """
+    try:
+        db = get_database()
+        if db is None:
+            print("⚠️ Cannot auto-sync: Database not connected")
+            return
+        
+        print("🔄 Auto-syncing last 2 days of data...")
+        result = await sync_last_n_days(db, 2)
+        print(f"✅ Auto-sync complete: {result['total_fetched']} machines fetched, {result['total_inserted']} inserted, {result['total_updated']} updated")
+    except Exception as e:
+        print(f"⚠️ Auto-sync failed (non-blocking): {e}")
 
 
 # ------------------- Lifespan Handler (Database Connection) -------------------
@@ -20,12 +42,15 @@ async def lifespan(app: FastAPI):
     """
     Handle startup and shutdown events.
     - Connect to MongoDB on startup
+    - Auto-sync recent data
     - Close connection on shutdown
     """
     # Startup
     print("🚀 Starting up...")
     try:
         await connect_to_database()
+        # Auto-sync DISABLED - read-only mode for AWS database
+        # await auto_sync_on_startup()
     except Exception as e:
         print(f"⚠️ MongoDB connection failed: {e}")
         print("⚠️ App will run but database features won't work")

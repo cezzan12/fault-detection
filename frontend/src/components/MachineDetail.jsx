@@ -1,24 +1,26 @@
 import { useState, useEffect } from 'react';
-import { 
-  ArrowLeft, 
-  Cpu, 
-  Users, 
-  MapPin, 
-  Clock, 
-  Wifi, 
-  WifiOff, 
-  Target, 
-  FileText, 
-  BarChart3, 
+import {
+  ArrowLeft,
+  Cpu,
+  Users,
+  MapPin,
+  Clock,
+  Wifi,
+  WifiOff,
+  Target,
+  FileText,
+  BarChart3,
   Loader2,
   Copy,
   Check,
   AlertTriangle,
-  Layers
+  Layers,
+  Activity
 } from 'lucide-react';
 import { fetchMachineById, fetchMachineBearingData } from '../services/api';
 import BearingReportGenerator from './BearingReportGenerator';
 import FFTChartModal from './FFTChartModal';
+import BearingAnalysisModal from './BearingAnalysisModal';
 import './MachineDetail.css';
 
 const StatusBadge = ({ status }) => {
@@ -34,7 +36,7 @@ const StatusBadge = ({ status }) => {
   const config = statusConfig[normalizedStatus] || statusConfig.normal;
 
   return (
-    <span className={`status-badge ${config.className}`}>
+    <span className={`status - badge ${config.className} `}>
       {config.label}
     </span>
   );
@@ -57,7 +59,7 @@ const CopyableId = ({ value, label }) => {
   return (
     <div className="copyable-id">
       <span className="id-value">{value}</span>
-      <button className="copy-btn" onClick={handleCopy} title={`Copy ${label}`}>
+      <button className="copy-btn" onClick={handleCopy} title={`Copy ${label} `}>
         {copied ? <Check size={14} /> : <Copy size={14} />}
       </button>
     </div>
@@ -73,6 +75,8 @@ const MachineDetail = ({ machineId, machineInfo, onBack }) => {
   const [showFFTModal, setShowFFTModal] = useState(false);
   const [fftData, setFftData] = useState(null);
   const [loadingFFT, setLoadingFFT] = useState(false);
+  const [showAnalysisModal, setShowAnalysisModal] = useState(false);
+  const [analyzeBearing, setAnalyzeBearing] = useState(null);
 
   useEffect(() => {
     const loadMachineDetails = async () => {
@@ -81,7 +85,7 @@ const MachineDetail = ({ machineId, machineInfo, onBack }) => {
       try {
         const response = await fetchMachineById(machineId);
         const machineData = response.machine;
-        
+
         // Merge API data with machineInfo passed from table (which has the name)
         const mergedData = {
           ...machineData,
@@ -95,7 +99,7 @@ const MachineDetail = ({ machineId, machineInfo, onBack }) => {
           dataUpdatedTime: machineInfo?.date || machineData.dataUpdatedTime,
           subareaId: machineInfo?.subareaId || machineData.subAreaId
         };
-        
+
         setMachine(mergedData);
         setBearings(machineData.bearings || []);
       } catch (err) {
@@ -144,9 +148,9 @@ const MachineDetail = ({ machineId, machineInfo, onBack }) => {
     if (!dateStr || dateStr === 'N/A') return 'N/A';
     try {
       const date = new Date(dateStr);
-      return date.toLocaleString('en-US', { 
-        month: 'numeric', 
-        day: 'numeric', 
+      return date.toLocaleString('en-US', {
+        month: 'numeric',
+        day: 'numeric',
         year: 'numeric',
         hour: 'numeric',
         minute: '2-digit',
@@ -218,7 +222,7 @@ const MachineDetail = ({ machineId, machineInfo, onBack }) => {
           <h1 className="machine-name">{machineName.toUpperCase()}</h1>
         </div>
         <p className="machine-subtitle">Detailed machine information and bearing data</p>
-        
+
         <BearingReportGenerator machine={machine} bearings={bearings} />
 
         {/* Info Grid */}
@@ -276,7 +280,7 @@ const MachineDetail = ({ machineId, machineInfo, onBack }) => {
             </div>
             <div className="info-content">
               <span className="info-label">TYPE</span>
-              <span className={`type-value ${type === 'ONLINE' ? 'online' : 'offline'}`}>
+              <span className={`type - value ${type === 'ONLINE' ? 'online' : 'offline'} `}>
                 {type === 'ONLINE' ? <Wifi size={14} /> : <WifiOff size={14} />}
                 {type}
               </span>
@@ -314,9 +318,9 @@ const MachineDetail = ({ machineId, machineInfo, onBack }) => {
             <tbody>
               {bearings.length > 0 ? (
                 bearings.map((bearing, index) => {
-                  const bearingId = bearing._id || bearing.bearingId || `bearing-${index}`;
+                  const bearingId = bearing._id || bearing.bearingId || `bearing - ${index} `;
                   const bearingStatus = (bearing.statusName || bearing.status || 'satisfactory').toLowerCase();
-                  
+
                   return (
                     <tr key={bearingId}>
                       <td className="bearing-id-cell">{bearingId}</td>
@@ -324,15 +328,25 @@ const MachineDetail = ({ machineId, machineInfo, onBack }) => {
                         <StatusBadge status={bearingStatus} />
                       </td>
                       <td className="actions-cell">
-                        <button 
+                        <button
                           className="btn btn-primary btn-sm"
                           onClick={() => handleShowCharts(bearing)}
                         >
                           <BarChart3 size={14} />
                           Show Charts
                         </button>
-                        <BearingReportGenerator 
-                          machine={machine} 
+                        <button
+                          className="btn btn-success btn-sm"
+                          onClick={() => {
+                            setAnalyzeBearing(bearing);
+                            setShowAnalysisModal(true);
+                          }}
+                        >
+                          <Activity size={14} />
+                          Analyze
+                        </button>
+                        <BearingReportGenerator
+                          machine={machine}
                           bearing={bearing}
                           bearings={[bearing]}
                           isSingleBearing={true}
@@ -364,6 +378,18 @@ const MachineDetail = ({ machineId, machineInfo, onBack }) => {
             setShowFFTModal(false);
             setSelectedBearing(null);
             setFftData(null);
+          }}
+        />
+      )}
+
+      {/* Bearing Analysis Modal */}
+      {showAnalysisModal && analyzeBearing && (
+        <BearingAnalysisModal
+          bearing={analyzeBearing}
+          machine={machine}
+          onClose={() => {
+            setShowAnalysisModal(false);
+            setAnalyzeBearing(null);
           }}
         />
       )}

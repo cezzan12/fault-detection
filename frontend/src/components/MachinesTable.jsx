@@ -48,34 +48,34 @@ const MachinesTable = ({ data = [], filters, loading = false, error = null, onMa
       // Compare using lowercase for status (API returns Normal, data stores normal)
       let machineStatus = (machine.status || '').toLowerCase();
       let filterStatus = (filters.status || '').toLowerCase();
-      
+
       // Normalize unsatisfactory/unacceptable naming
       if (machineStatus === 'unsatisfactory') machineStatus = 'unacceptable';
       if (filterStatus === 'unsatisfactory') filterStatus = 'unacceptable';
-      
+
       if (filters.areaId && filters.areaId !== 'All' && machine.areaId !== filters.areaId) return false;
       if (filters.status && filters.status !== 'All' && machineStatus !== filterStatus) return false;
       if (filters.customerId && filters.customerId !== 'All' && machine.customerId !== filters.customerId) return false;
       if (filters.fromDate && machine.date && machine.date < filters.fromDate) return false;
       if (filters.toDate && machine.date && machine.date > filters.toDate) return false;
-      
+
       // Search filter - search by selected field or auto-detect
       if (filters.searchQuery && filters.searchQuery.trim() !== '') {
         const query = filters.searchQuery.toLowerCase().trim();
         const searchField = filters.searchField || 'machineName';
-        
+
         // Auto-detect: search across all fields
         if (searchField === 'autoDetect') {
           const machineName = (machine.machineName || '').toLowerCase();
           const machineId = (machine.machineId || '').toLowerCase();
-          const customerId = (machine.customerId || '').toLowerCase();
+          const customerName = (machine.customerName || machine.customerId || '').toLowerCase();
           const areaId = (machine.areaId || '').toLowerCase();
-          
+
           // Match if query found in any field
-          if (!machineName.includes(query) && 
-              !machineId.includes(query) && 
-              !customerId.includes(query) && 
-              !areaId.includes(query)) {
+          if (!machineName.includes(query) &&
+            !machineId.includes(query) &&
+            !customerName.includes(query) &&
+            !areaId.includes(query)) {
             return false;
           }
         } else {
@@ -89,7 +89,7 @@ const MachinesTable = ({ data = [], filters, loading = false, error = null, onMa
               fieldValue = (machine.machineId || '').toLowerCase();
               break;
             case 'customerId':
-              fieldValue = (machine.customerId || '').toLowerCase();
+              fieldValue = (machine.customerName || machine.customerId || '').toLowerCase();
               break;
             case 'areaId':
               fieldValue = (machine.areaId || '').toLowerCase();
@@ -97,11 +97,11 @@ const MachinesTable = ({ data = [], filters, loading = false, error = null, onMa
             default:
               fieldValue = (machine.machineName || '').toLowerCase();
           }
-          
+
           if (!fieldValue.includes(query)) return false;
         }
       }
-      
+
       return true;
     });
   }, [data, filters]);
@@ -168,12 +168,12 @@ const MachinesTable = ({ data = [], filters, loading = false, error = null, onMa
 
   const generateReport = async () => {
     if (!selectedMachine) return;
-    
+
     setGeneratingReport(true);
-    
+
     // Simulate report generation delay
     await new Promise(resolve => setTimeout(resolve, 500));
-    
+
     // Create report content
     const reportContent = `
 ================================================================================
@@ -232,13 +232,20 @@ ${selectedMachine.status === 'unacceptable' ? '• IMMEDIATE inspection required
     link.click();
     document.body.removeChild(link);
     URL.revokeObjectURL(url);
-    
+
     setGeneratingReport(false);
   };
 
   const formatDate = (dateStr) => {
-    const date = new Date(dateStr);
-    return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+    if (!dateStr || dateStr === 'N/A') return 'N/A';
+    try {
+      const date = new Date(dateStr);
+      // Check if date is valid
+      if (isNaN(date.getTime())) return 'N/A';
+      return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+    } catch {
+      return 'N/A';
+    }
   };
 
   // Loading state
@@ -292,7 +299,7 @@ ${selectedMachine.status === 'unacceptable' ? '• IMMEDIATE inspection required
             </button>
           </div>
           <div className="selection-actions">
-            <MultiReportGenerator 
+            <MultiReportGenerator
               machines={selectedMachines}
               onClearSelection={clearSelection}
             />
@@ -309,15 +316,15 @@ ${selectedMachine.status === 'unacceptable' ? '• IMMEDIATE inspection required
         </div>
         {filteredData.length > 0 && (
           <div className="bulk-select-actions">
-            <button 
+            <button
               className="btn btn-secondary btn-sm"
               onClick={handleSelectAll}
             >
-              {selectedMachines.length === currentData.length && currentData.length > 0 
-                ? 'Deselect Page' 
+              {selectedMachines.length === currentData.length && currentData.length > 0
+                ? 'Deselect Page'
                 : 'Select Page'}
             </button>
-            <button 
+            <button
               className="btn btn-secondary btn-sm"
               onClick={handleSelectAllFiltered}
             >
@@ -343,7 +350,7 @@ ${selectedMachine.status === 'unacceptable' ? '• IMMEDIATE inspection required
                 />
               </th>
               <th className="select-column">View</th>
-              <th>Customer ID</th>
+              <th>Customer</th>
               <th>Machine Name</th>
               <th>Machine ID</th>
               <th>Status</th>
@@ -358,69 +365,69 @@ ${selectedMachine.status === 'unacceptable' ? '• IMMEDIATE inspection required
             {currentData.length > 0 ? (
               currentData.map((machine, index) => (
                 <React.Fragment key={machine.id}>
-                <tr 
-                  className={`${index % 2 === 0 ? 'row-even' : 'row-odd'} ${selectedMachine?.id === machine.id ? 'row-selected' : ''} ${isMachineSelected(machine) ? 'row-checked' : ''}`}
-                  onClick={() => handleMachineSelect(machine)}
-                >
-                  <td className="checkbox-column" onClick={(e) => e.stopPropagation()}>
-                    <input
-                      type="checkbox"
-                      checked={isMachineSelected(machine)}
-                      onChange={(e) => handleCheckboxChange(machine, e)}
-                      className="machine-checkbox"
-                    />
-                  </td>
-                  <td className="select-column">
-                    <input
-                      type="radio"
-                      name="machine-select"
-                      checked={selectedMachine?.id === machine.id}
-                      onChange={() => handleMachineSelect(machine)}
-                      className="machine-radio"
-                    />
-                  </td>
-                  <td className="cell-customer">{machine.customerId}</td>
-                  <td className="cell-name">{machine.machineName}</td>
-                  <td className="cell-id"><code>{machine.machineId}</code></td>
-                  <td><StatusBadge status={machine.status} /></td>
-                  <td><TypeBadge type={machine.type} /></td>
-                  <td>{machine.areaId}</td>
-                  <td>{machine.subareaId}</td>
-                  <td className="cell-date">{formatDate(machine.date)}</td>
-                  <td>
-                    <button 
-                      className="action-btn" 
-                      title="View Details"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        if (onMachineClick) {
-                          onMachineClick(machine);
-                        }
-                      }}
-                    >
-                      <Eye size={16} />
-                    </button>
-                  </td>
-                </tr>
-                {/* Download Report row - appears below selected machine */}
-                {selectedMachine?.id === machine.id && (
-                  <tr className="download-row">
-                    <td colSpan="11">
-                      <div className="download-row-content">
-                        <div className="selected-machine-info">
-                          <FileText size={16} />
-                          <span>Selected: <strong>{selectedMachine.machineName}</strong></span>
-                        </div>
-                        <ReportGenerator 
-                          machine={selectedMachine}
-                          onGenerateStart={() => setGeneratingReport(true)}
-                          onGenerateEnd={() => setGeneratingReport(false)}
-                        />
-                      </div>
+                  <tr
+                    className={`${index % 2 === 0 ? 'row-even' : 'row-odd'} ${selectedMachine?.id === machine.id ? 'row-selected' : ''} ${isMachineSelected(machine) ? 'row-checked' : ''}`}
+                    onClick={() => handleMachineSelect(machine)}
+                  >
+                    <td className="checkbox-column" onClick={(e) => e.stopPropagation()}>
+                      <input
+                        type="checkbox"
+                        checked={isMachineSelected(machine)}
+                        onChange={(e) => handleCheckboxChange(machine, e)}
+                        className="machine-checkbox"
+                      />
+                    </td>
+                    <td className="select-column">
+                      <input
+                        type="radio"
+                        name="machine-select"
+                        checked={selectedMachine?.id === machine.id}
+                        onChange={() => handleMachineSelect(machine)}
+                        className="machine-radio"
+                      />
+                    </td>
+                    <td className="cell-customer">{machine.customerName || machine.customerId}</td>
+                    <td className="cell-name">{machine.machineName}</td>
+                    <td className="cell-id"><code>{machine.machineId}</code></td>
+                    <td><StatusBadge status={machine.status} /></td>
+                    <td><TypeBadge type={machine.type} /></td>
+                    <td>{machine.areaId}</td>
+                    <td>{machine.subareaId}</td>
+                    <td className="cell-date">{formatDate(machine.date)}</td>
+                    <td>
+                      <button
+                        className="action-btn"
+                        title="View Details"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          if (onMachineClick) {
+                            onMachineClick(machine);
+                          }
+                        }}
+                      >
+                        <Eye size={16} />
+                      </button>
                     </td>
                   </tr>
-                )}
-              </React.Fragment>
+                  {/* Download Report row - appears below selected machine */}
+                  {selectedMachine?.id === machine.id && (
+                    <tr className="download-row">
+                      <td colSpan="11">
+                        <div className="download-row-content">
+                          <div className="selected-machine-info">
+                            <FileText size={16} />
+                            <span>Selected: <strong>{selectedMachine.machineName}</strong></span>
+                          </div>
+                          <ReportGenerator
+                            machine={selectedMachine}
+                            onGenerateStart={() => setGeneratingReport(true)}
+                            onGenerateEnd={() => setGeneratingReport(false)}
+                          />
+                        </div>
+                      </td>
+                    </tr>
+                  )}
+                </React.Fragment>
               ))
             ) : (
               <tr>
@@ -439,7 +446,7 @@ ${selectedMachine.status === 'unacceptable' ? '• IMMEDIATE inspection required
           Page {currentPage} of {totalPages || 1}
         </div>
         <div className="pagination-controls">
-          <button 
+          <button
             className="page-btn"
             onClick={handlePrevPage}
             disabled={currentPage === 1}
@@ -470,7 +477,7 @@ ${selectedMachine.status === 'unacceptable' ? '• IMMEDIATE inspection required
               );
             })}
           </div>
-          <button 
+          <button
             className="page-btn"
             onClick={handleNextPage}
             disabled={currentPage === totalPages || totalPages === 0}

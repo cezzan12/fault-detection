@@ -5,12 +5,57 @@
 // Backend runs on port 8000 (FastAPI default)
 const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
 
-// Helper function for API calls
+// ==========================================
+// THROTTLE/RATE LIMITING
+// ==========================================
+
+// Store for tracking last call times per endpoint
+const lastCallTimes = {};
+const pendingCalls = {};
+const MIN_INTERVAL_MS = 5000; // Minimum 5 seconds between calls to same endpoint
+
+/**
+ * Throttle function to limit API calls
+ * Returns cached promise if called within MIN_INTERVAL_MS
+ */
+const throttledFetch = async (endpoint, options = {}) => {
+  const cacheKey = `${options.method || 'GET'}:${endpoint}`;
+  const now = Date.now();
+  const lastCall = lastCallTimes[cacheKey] || 0;
+  const timeSinceLastCall = now - lastCall;
+
+  // If there's a pending call for this endpoint, return it
+  if (pendingCalls[cacheKey]) {
+    console.log(`[API] Throttled: Reusing pending call for ${cacheKey}`);
+    return pendingCalls[cacheKey];
+  }
+
+  // If called too soon, wait for the remaining time
+  if (timeSinceLastCall < MIN_INTERVAL_MS) {
+    const waitTime = MIN_INTERVAL_MS - timeSinceLastCall;
+    console.log(`[API] Throttled: Waiting ${waitTime}ms before ${cacheKey}`);
+    await new Promise(resolve => setTimeout(resolve, waitTime));
+  }
+
+  // Update last call time
+  lastCallTimes[cacheKey] = Date.now();
+
+  // Make the actual call and store the promise
+  const callPromise = fetchApi(endpoint, options).finally(() => {
+    // Clear pending call after completion
+    delete pendingCalls[cacheKey];
+  });
+
+  pendingCalls[cacheKey] = callPromise;
+  return callPromise;
+};
+
+// Helper function for API calls (raw, unthrottled)
 const fetchApi = async (endpoint, options = {}) => {
   try {
     const url = `${API_BASE_URL}${endpoint}`;
     console.log(`[API] ${options.method || 'GET'} ${url}`);
-    
+
     const response = await fetch(url, {
       headers: {
         'Content-Type': 'application/json',
@@ -31,11 +76,16 @@ const fetchApi = async (endpoint, options = {}) => {
   }
 };
 
+
 // ==========================================
 // SYNC API - Keep data updated from external API
 // ==========================================
 
 export const triggerAutoSync = async () => {
+  // DISABLED: Read-only mode - do not sync to AWS database
+  console.log('[API] Auto-sync DISABLED - running in read-only mode');
+  return { needs_sync: false, message: 'Sync disabled - read-only mode' };
+  /*
   try {
     const response = await fetch(`${API_BASE_URL}/sync/auto`, {
       method: 'POST',
@@ -46,6 +96,7 @@ export const triggerAutoSync = async () => {
     console.warn('[API] Auto-sync failed (non-blocking):', error.message);
     return { needs_sync: false, message: 'Sync unavailable' };
   }
+  */
 };
 
 export const getSyncStatus = async () => {
@@ -53,19 +104,15 @@ export const getSyncStatus = async () => {
 };
 
 export const syncToday = async () => {
-  const response = await fetch(`${API_BASE_URL}/sync/today`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' }
-  });
-  return await response.json();
+  // DISABLED: Read-only mode
+  console.log('[API] syncToday DISABLED - running in read-only mode');
+  return { message: 'Sync disabled - read-only mode', synced: 0 };
 };
 
 export const syncRecent = async (days = 7) => {
-  const response = await fetch(`${API_BASE_URL}/sync/recent?days=${days}`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' }
-  });
-  return await response.json();
+  // DISABLED: Read-only mode
+  console.log('[API] syncRecent DISABLED - running in read-only mode');
+  return { message: 'Sync disabled - read-only mode', synced: 0 };
 };
 
 // ==========================================
@@ -76,7 +123,7 @@ export const syncRecent = async (days = 7) => {
 export const fetchMachines = async (filters = {}) => {
   // Build query params based on backend API
   const params = new URLSearchParams();
-  
+
   if (filters.date_from || filters.fromDate) {
     params.append('date_from', filters.date_from || filters.fromDate);
   }
@@ -95,15 +142,18 @@ export const fetchMachines = async (filters = {}) => {
   if (filters.machineType) {
     params.append('machineType', filters.machineType);
   }
-  
+  if (filters.limit) {
+    params.append('limit', filters.limit);
+  }
+
   const queryString = params.toString();
   const endpoint = queryString ? `/machines?${queryString}` : '/machines';
-  
-  return fetchApi(endpoint);
+
+  return throttledFetch(endpoint);
 };
 
 export const fetchMachineById = async (machineId) => {
-  return fetchApi(`/machines/${machineId}`);
+  return throttledFetch(`/machines/${machineId}`);
 };
 
 export const fetchMachineBearingData = async (machineId, bearingId, options = {}) => {
@@ -112,11 +162,23 @@ export const fetchMachineBearingData = async (machineId, bearingId, options = {}
   if (options.axis) params.append('axis', options.axis);
   if (options.data_type) params.append('data_type', options.data_type);
   if (options.analytics_type) params.append('analytics_type', options.analytics_type);
-  
+
   const queryString = params.toString();
   const endpoint = `/machines/data/${machineId}/${bearingId}${queryString ? '?' + queryString : ''}`;
-  
+
   return fetchApi(endpoint);
+};
+
+// Fetch comprehensive FFT analysis for a bearing (all axes)
+export const fetchBearingFFTAnalysis = async (machineId, bearingId, options = {}) => {
+  const params = new URLSearchParams();
+  if (options.data_type) params.append('data_type', options.data_type);
+  if (options.machine_class) params.append('machine_class', options.machine_class);
+
+  const queryString = params.toString();
+  const endpoint = `/machines/fft-analysis/${machineId}/${bearingId}${queryString ? '?' + queryString : ''}`;
+
+  return throttledFetch(endpoint, { method: 'POST' });
 };
 
 // ==========================================
@@ -154,7 +216,7 @@ export const calculateKpiFromMachines = (machines = []) => {
     alert: 0,
     unacceptable: 0
   };
-  
+
   machines.forEach(machine => {
     const status = (machine.statusName || machine.status || '').toLowerCase();
     if (status === 'normal') statusCounts.normal++;
@@ -162,7 +224,7 @@ export const calculateKpiFromMachines = (machines = []) => {
     else if (status === 'alert') statusCounts.alert++;
     else if (status === 'unacceptable' || status === 'unsatisfactory') statusCounts.unacceptable++;
   });
-  
+
   return statusCounts;
 };
 
@@ -170,7 +232,7 @@ export const calculateKpiFromMachines = (machines = []) => {
 export const extractFilterOptions = (machines = []) => {
   const areas = new Set(['All']);
   const customers = new Set(['All']);
-  
+
   machines.forEach(machine => {
     if (machine.areaId && machine.areaId !== 'N/A') {
       areas.add(machine.areaId);
@@ -179,7 +241,7 @@ export const extractFilterOptions = (machines = []) => {
       customers.add(machine.customerId);
     }
   });
-  
+
   return {
     areaOptions: Array.from(areas),
     customerOptions: Array.from(customers)
@@ -189,7 +251,7 @@ export const extractFilterOptions = (machines = []) => {
 // Generate customer trend data from machines (group by date and customer)
 export const generateCustomerTrendData = (machines = []) => {
   const dateCustomerMap = {};
-  
+
   machines.forEach(machine => {
     // Extract date from dataUpdatedTime or use a fallback
     let dateStr = 'Unknown';
@@ -201,9 +263,9 @@ export const generateCustomerTrendData = (machines = []) => {
         dateStr = machine.dataUpdatedTime.split('T')[0];
       }
     }
-    
+
     const customerId = machine.customerId || 'Unknown';
-    
+
     if (!dateCustomerMap[dateStr]) {
       dateCustomerMap[dateStr] = {};
     }
@@ -212,7 +274,7 @@ export const generateCustomerTrendData = (machines = []) => {
     }
     dateCustomerMap[dateStr][customerId]++;
   });
-  
+
   // Convert to array format for Recharts
   const trendData = Object.entries(dateCustomerMap)
     .map(([date, customers]) => ({
@@ -220,14 +282,14 @@ export const generateCustomerTrendData = (machines = []) => {
       ...customers
     }))
     .sort((a, b) => a.date.localeCompare(b.date));
-  
+
   return trendData;
 };
 
 // Generate status trend data from machines (group by date and status)
 export const generateStatusTrendData = (machines = []) => {
   const dateStatusMap = {};
-  
+
   machines.forEach(machine => {
     // Extract date from dataUpdatedTime or use a fallback
     let dateStr = 'Unknown';
@@ -239,9 +301,9 @@ export const generateStatusTrendData = (machines = []) => {
         dateStr = machine.dataUpdatedTime.split('T')[0];
       }
     }
-    
+
     const status = (machine.statusName || machine.status || 'unknown').toLowerCase();
-    
+
     if (!dateStatusMap[dateStr]) {
       dateStatusMap[dateStr] = {
         normal: 0,
@@ -250,13 +312,13 @@ export const generateStatusTrendData = (machines = []) => {
         unacceptable: 0
       };
     }
-    
+
     if (status === 'normal') dateStatusMap[dateStr].normal++;
     else if (status === 'satisfactory') dateStatusMap[dateStr].satisfactory++;
     else if (status === 'alert') dateStatusMap[dateStr].alert++;
     else if (status === 'unacceptable' || status === 'unsatisfactory') dateStatusMap[dateStr].unacceptable++;
   });
-  
+
   // Convert to array format for Recharts
   const trendData = Object.entries(dateStatusMap)
     .map(([date, statuses]) => ({
@@ -264,7 +326,7 @@ export const generateStatusTrendData = (machines = []) => {
       ...statuses
     }))
     .sort((a, b) => a.date.localeCompare(b.date));
-  
+
   return trendData;
 };
 
