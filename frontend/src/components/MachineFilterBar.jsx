@@ -14,11 +14,11 @@ const SEARCH_FIELDS = [
   { value: 'autoDetect', label: 'Auto Detect', icon: Sparkles },
   { value: 'machineName', label: 'Machine Name', icon: Cpu },
   { value: 'machineId', label: 'Machine ID', icon: Hash },
-  { value: 'customerId', label: 'Customer ID', icon: Users },
-  { value: 'areaId', label: 'Area ID', icon: MapPin }
+  { value: 'customerId', label: 'Customer Name', icon: Users },
+  { value: 'areaId', label: 'Area Name', icon: MapPin }
 ];
 
-const MachineFilterBar = ({ 
+const MachineFilterBar = ({
   onApplyFilter,
   areaOptions = ['All'],
   statusOptions = ['All', 'Normal', 'Satisfactory', 'Alert', 'Unacceptable'],
@@ -31,7 +31,7 @@ const MachineFilterBar = ({
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [detectedType, setDetectedType] = useState(null);
   const searchContainerRef = useRef(null);
-  
+
   const [filters, setFilters] = useState({
     areaId: initialFilters.areaId || 'All',
     status: initialFilters.status || 'All',
@@ -79,9 +79,9 @@ const MachineFilterBar = ({
   // Auto-detect field type based on query
   const detectFieldType = (query) => {
     if (!query || !machinesData.length) return null;
-    
+
     const q = query.toLowerCase();
-    
+
     // Check which fields have matches
     const matches = {
       machineName: machinesData.some(m => (m.machineName || '').toLowerCase().includes(q)),
@@ -89,14 +89,14 @@ const MachineFilterBar = ({
       customerId: machinesData.some(m => (m.customerId || '').toLowerCase().includes(q)),
       areaId: machinesData.some(m => (m.areaId || '').toLowerCase().includes(q))
     };
-    
+
     // Find the first matching field, prioritize ID fields for ID-like queries
     const matchingFields = Object.entries(matches).filter(([_, hasMatch]) => hasMatch).map(([field]) => field);
-    
+
     if (matchingFields.length === 1) {
       return matchingFields[0];
     }
-    
+
     // If multiple matches, try to guess by pattern
     // If it looks like an ID (contains numbers/special chars), prefer ID fields
     if (/^[a-f0-9]{20,}$/i.test(q)) {
@@ -104,7 +104,7 @@ const MachineFilterBar = ({
       if (matches.machineId) return 'machineId';
       if (matches.customerId) return 'customerId';
     }
-    
+
     return matchingFields[0] || null;
   };
 
@@ -113,15 +113,15 @@ const MachineFilterBar = ({
     if (!searchQuery || searchQuery.length < 1 || !machinesData.length) {
       return [];
     }
-    
+
     const query = searchQuery.toLowerCase();
     const results = [];
     const seen = new Set();
-    
+
     if (searchField === 'autoDetect') {
       // Search all fields and group by type
       const fieldTypes = ['machineName', 'machineId', 'customerId', 'areaId'];
-      
+
       fieldTypes.forEach(field => {
         machinesData.forEach(machine => {
           const value = machine[field] || '';
@@ -137,7 +137,7 @@ const MachineFilterBar = ({
           }
         });
       });
-      
+
       // Sort by field type, then alphabetically
       results.sort((a, b) => {
         const fieldOrder = { machineName: 0, machineId: 1, customerId: 2, areaId: 3 };
@@ -161,11 +161,11 @@ const MachineFilterBar = ({
           });
         }
       });
-      
+
       // Sort alphabetically
       results.sort((a, b) => a.value.localeCompare(b.value));
     }
-    
+
     // Limit to 10 suggestions
     return results.slice(0, 10);
   }, [searchQuery, searchField, machinesData]);
@@ -194,10 +194,10 @@ const MachineFilterBar = ({
   const handleSearch = () => {
     console.log('Searching:', searchField, searchQuery);
     setShowSuggestions(false);
-    
+
     // For auto-detect, use the detected field type
     const effectiveField = searchField === 'autoDetect' ? (detectedType || 'autoDetect') : searchField;
-    
+
     if (onApplyFilter) {
       onApplyFilter({ ...filters, searchField: effectiveField, searchQuery });
     }
@@ -220,12 +220,12 @@ const MachineFilterBar = ({
   const handleSuggestionClick = (suggestion) => {
     setSearchQuery(suggestion.value);
     setShowSuggestions(false);
-    
+
     // If auto-detect, switch to the detected field type
     if (searchField === 'autoDetect') {
       setSearchField(suggestion.field);
     }
-    
+
     // Apply the search immediately
     if (onApplyFilter) {
       onApplyFilter({ ...filters, searchField: suggestion.field, searchQuery: suggestion.value });
@@ -277,7 +277,7 @@ const MachineFilterBar = ({
           <span>Filter Machines</span>
         </div>
       </div>
-      
+
       <div className="filter-bar-content">
         {/* Search Bar Row */}
         <div className="search-row">
@@ -307,13 +307,13 @@ const MachineFilterBar = ({
                   onChange={handleSearchInputChange}
                   onKeyDown={handleSearchKeyPress}
                   onFocus={() => searchQuery.length > 0 && setShowSuggestions(true)}
-                  placeholder={searchField === 'autoDetect' 
-                    ? 'Type to search any field...' 
+                  placeholder={searchField === 'autoDetect'
+                    ? 'Type to search any field...'
                     : `Search by ${SEARCH_FIELDS.find(f => f.value === searchField)?.label || 'field'}...`}
                   className="search-input"
                 />
                 {searchQuery && (
-                  <button 
+                  <button
                     className="search-clear-btn"
                     onClick={() => {
                       setSearchQuery('');
@@ -328,7 +328,7 @@ const MachineFilterBar = ({
                   </button>
                 )}
               </div>
-              
+
               {/* Autocomplete Dropdown */}
               {showSuggestions && suggestions.length > 0 && (
                 <div className="search-suggestions-dropdown">
@@ -341,7 +341,7 @@ const MachineFilterBar = ({
                   {suggestions.map((suggestion, index) => {
                     const SuggestionIcon = suggestion.icon;
                     return (
-                      <div 
+                      <div
                         key={`${suggestion.field}-${suggestion.value}-${index}`}
                         className="suggestion-item"
                         onClick={() => handleSuggestionClick(suggestion)}
@@ -370,7 +370,7 @@ const MachineFilterBar = ({
           <div className="filter-group">
             <label className="filter-label">
               <MapPin size={14} />
-              Area ID
+              Area
             </label>
             <select
               value={filters.areaId}
@@ -404,7 +404,7 @@ const MachineFilterBar = ({
           <div className="filter-group">
             <label className="filter-label">
               <Users size={14} />
-              Customer ID
+              Customer
             </label>
             <select
               value={filters.customerId}

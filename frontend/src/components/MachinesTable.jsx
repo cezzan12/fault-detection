@@ -355,8 +355,8 @@ ${selectedMachine.status === 'unacceptable' ? '• IMMEDIATE inspection required
               <th>Machine ID</th>
               <th>Status</th>
               <th>Type</th>
-              <th>Area ID</th>
-              <th>Subarea ID</th>
+              <th>Area</th>
+              <th>Sub Area</th>
               <th>Date</th>
               <th>Actions</th>
             </tr>
