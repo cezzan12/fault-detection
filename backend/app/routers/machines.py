@@ -258,6 +258,93 @@ async def check_mongodb_has_data(date_list: List[str]) -> bool:
         return False
 
 
+async def fetch_bearings_from_mongodb(machine_id: str) -> List[dict]:
+    """
+    Fetch bearing locations from MongoDB for a given machine.
+    Returns empty list if MongoDB is not available or has no data.
+    """
+    try:
+        db = get_database()
+        if db is None:
+            logging.info(f"[MongoDB] Database not available for bearing lookup")
+            return []
+        
+        # Try bearing_locations collection first
+        try:
+            bearing_collection = db.bearing_locations
+            cursor = bearing_collection.find({"machineId": machine_id})
+            bearings = await cursor.to_list(length=None)
+            
+            if bearings:
+                logging.info(f"📦 Fetched {len(bearings)} bearings from MongoDB (bearing_locations collection)")
+                return bearings
+        except Exception as e:
+            logging.debug(f"bearing_locations collection not found or error: {e}")
+        
+        # Try looking in machines collection for embedded bearings
+        try:
+            machines_collection = db.machines
+            machine = await machines_collection.find_one({
+                "$or": [
+                    {"_id": machine_id},
+                    {"machineId": machine_id}
+                ]
+            })
+            
+            if machine and "bearings" in machine:
+                bearings = machine.get("bearings", [])
+                if bearings:
+                    logging.info(f"📦 Fetched {len(bearings)} embedded bearings from MongoDB (machines collection)")
+                    return bearings
+            
+            # Check for bearingLocations field (alternative naming)
+            if machine and "bearingLocations" in machine:
+                bearings = machine.get("bearingLocations", [])
+                if bearings:
+                    logging.info(f"📦 Fetched {len(bearings)} bearingLocations from MongoDB")
+                    return bearings
+        except Exception as e:
+            logging.debug(f"Error looking up bearings in machines collection: {e}")
+        
+        logging.info(f"[MongoDB] No bearings found for machine {machine_id}")
+        return []
+        
+    except Exception as e:
+        logging.warning(f"MongoDB bearing fetch failed: {e}")
+        return []
+
+
+async def fetch_machine_from_mongodb(machine_id: str) -> Optional[dict]:
+    """
+    Fetch a single machine from MongoDB by ID.
+    Returns None if not found.
+    """
+    try:
+        db = get_database()
+        if db is None:
+            return None
+        
+        machines_collection = db.machines
+        
+        # Try to find by machineId or _id
+        machine = await machines_collection.find_one({
+            "$or": [
+                {"machineId": machine_id},
+                {"_id": machine_id}
+            ]
+        })
+        
+        if machine:
+            logging.info(f"📦 Found machine {machine_id} in MongoDB")
+            return machine
+        
+        return None
+        
+    except Exception as e:
+        logging.warning(f"MongoDB machine fetch failed: {e}")
+        return None
+
+
 # ------------------- 1️⃣ Machines (GET + POST) -------------------
 @router.get("/machines")
 @router.post("/machines")
@@ -544,67 +631,94 @@ async def get_machine_detail(
     machine_id: str,
 ):
     """
-    Fetch a specific machine and its bearings (no date required).
+    Fetch a specific machine and its bearings.
+    Uses MongoDB first, falls back to external API if not found.
     """
+    data_source = "api"
+    
     try:
-        async with httpx.AsyncClient(timeout=120) as client:
-            # Step 1: Fetch all machines from external API
-            res = await client.post(BEARING_URL, headers=HEADERS, json={"machineId": machine_id})
-            if res.status_code != 200:
-                logging.error(f"Failed to fetch machine list: {res.status_code} - {res.text}")
-                raise HTTPException(status_code=res.status_code, detail=f"Failed to fetch machine list: {res.text}")
+        machine = None
+        bearings = []
+        
+        # =============== Step 1: Try MongoDB First ===============
+        logging.info(f"[Machine Detail] Looking up machine {machine_id} in MongoDB...")
+        
+        # Try to get machine from MongoDB
+        machine = await fetch_machine_from_mongodb(machine_id)
+        
+        if machine:
+            data_source = "mongodb"
+            logging.info(f"✅ [MongoDB] Found machine {machine_id}")
+            
+            # Try to get bearings from MongoDB
+            bearings = await fetch_bearings_from_mongodb(machine_id)
+            if bearings:
+                logging.info(f"✅ [MongoDB] Found {len(bearings)} bearings for machine {machine_id}")
+        
+        # =============== Step 2: Fallback to External API if needed ===============
+        if not machine or not bearings:
+            logging.info(f"📡 [External API] Fetching data for machine {machine_id}...")
+            
+            async with httpx.AsyncClient(timeout=120) as client:
+                # Fetch from BearingLocation API (returns machine + bearings)
+                res = await client.post(BEARING_URL, headers=HEADERS, json={"machineId": machine_id})
+                
+                if res.status_code == 200:
+                    try:
+                        api_data = res.json()
+                        
+                        if api_data and isinstance(api_data, list):
+                            # BearingLocation API returns a list of bearings
+                            # The bearings contain machine info
+                            if not bearings:
+                                bearings = api_data
+                                logging.info(f"📡 [External API] Fetched {len(bearings)} bearings")
+                            
+                            # Try to extract machine info from first bearing if not already found
+                            if not machine and len(api_data) > 0:
+                                first_item = api_data[0]
+                                # Try to construct machine from bearing data
+                                machine = {
+                                    "_id": first_item.get("machineId", machine_id),
+                                    "machineId": first_item.get("machineId", machine_id),
+                                    "name": first_item.get("machineName", ""),
+                                    "customerId": first_item.get("customerId", "N/A"),
+                                    "areaId": first_item.get("areaId", "N/A"),
+                                    "type": first_item.get("type", "OFFLINE"),
+                                    "dataUpdatedTime": first_item.get("dataUpdatedTime", "N/A"),
+                                }
+                                data_source = "api"
+                                logging.info(f"📡 [External API] Constructed machine info from bearings")
+                    except Exception as json_err:
+                        logging.error(f"Error parsing API response: {json_err}")
+                else:
+                    logging.warning(f"External API returned {res.status_code}")
+        
+        # =============== Step 3: Validate we have data ===============
+        if not machine:
+            logging.error(f"Machine with ID {machine_id} not found in MongoDB or API")
+            raise HTTPException(status_code=404, detail=f"Machine with ID {machine_id} not found")
+        
+        # Ensure bearings is a list
+        if not isinstance(bearings, list):
+            bearings = []
+        
+        # Add default FFT data if not provided
+        for b in bearings:
+            b.setdefault("fftData", [{"frequency": f, "amplitude": 1.0} for f in range(1, 11)])
 
-            try:
-                machines = res.json()
-            except Exception as json_err:
-                logging.error(f"Error parsing machine list JSON: {json_err}")
-                raise HTTPException(status_code=500, detail="Malformed response from external API")
+        # =============== Step 4: Ensure all expected fields are present ===============
+        machine["customerId"] = machine.get("customerId") or "N/A"
+        machine["areaId"] = machine.get("areaId") or "N/A"
+        machine["type"] = machine.get("type") or "N/A"
+        machine["dataUpdatedTime"] = machine.get("dataUpdatedTime") or "N/A"
+        machine["bearings"] = bearings
+        machine["source"] = data_source
 
-            if not machines or not isinstance(machines, list):
-                logging.error(f"Unexpected API response format: {machines}")
-                raise HTTPException(status_code=500, detail="Unexpected API response format (expected list)")
+        # Convert MongoDB ObjectIds and other non-serializable objects to JSON-serializable format
+        machine_serialized = make_json_serializable(machine)
 
-            # Step 2: Find matching machine by ID
-            machine = next(
-                (m for m in machines if str(m.get("_id")) == machine_id or str(m.get("machineId")) == machine_id),
-                None
-            )
-            if not machine:
-                logging.error(f"Machine with ID {machine_id} not found in API response")
-                raise HTTPException(status_code=404, detail=f"Machine with ID {machine_id} not found")
-
-            # Step 3: Fetch bearings for that machine
-            res_bearing = await client.post(BEARING_URL, headers=HEADERS, json={"machineId": machine_id})
-            if res_bearing.status_code != 200:
-                logging.error(f"Failed to fetch bearings: {res_bearing.status_code} - {res_bearing.text}")
-                raise HTTPException(status_code=res_bearing.status_code, detail=f"Failed to fetch bearings: {res_bearing.text}")
-
-            try:
-                bearings = res_bearing.json()
-            except Exception as json_err:
-                logging.error(f"Error parsing bearings JSON: {json_err}")
-                bearings = []
-
-            if not isinstance(bearings, list):
-                logging.warning(f"Bearings response not a list: {bearings}")
-                bearings = []
-
-            # Add dummy FFT data if not provided
-            for b in bearings:
-                b.setdefault("fftData", [{"frequency": f, "amplitude": 1.0} for f in range(1, 11)])
-
-            # Ensure all expected fields are present
-            machine["customerId"] = machine.get("customerId") or "N/A"
-            machine["areaId"] = machine.get("areaId") or "N/A"
-            machine["type"] = machine.get("type") or "N/A"
-            machine["dataUpdatedTime"] = machine.get("dataUpdatedTime") or "N/A"
-
-            machine["bearings"] = bearings
-
-            # Convert MongoDB ObjectIds and other non-serializable objects to JSON-serializable format
-            machine_serialized = make_json_serializable(machine)
-
-            return {"machine": machine_serialized}
+        return {"machine": machine_serialized, "source": data_source}
 
     except HTTPException:
         raise
@@ -851,34 +965,56 @@ async def get_fft_analysis(
                         'available': False
                     }
         
-            # Fetch external bearing status from BearingLocation API
+        # =============== Fetch bearing status (MongoDB first, API fallback) ===============
             external_status = None
+            status_source = "none"
             print(f"\n{'='*60}")
-            print(f"[FFT API] Fetching external bearing status...")
-            print(f"[FFT API] URL: {BEARING_URL}")
-            print(f"[FFT API] Request: machineId={machine_id}")
+            print(f"[FFT API] Looking up bearing status...")
+            
+            # Step 1: Try MongoDB first
             try:
-                bearing_response = await client.post(
-                    BEARING_URL, 
-                    headers=HEADERS, 
-                    json={"machineId": machine_id}
-                )
-                print(f"[FFT API] BearingLocation Response Status: {bearing_response.status_code}", flush=True)
-                if bearing_response.status_code == 200:
-                    bearings_data = bearing_response.json()
-                    print(f"[FFT API] Found {len(bearings_data)} bearings for machine", flush=True)
-                    # Find the specific bearing
-                    for b in bearings_data:
-                        if b.get('_id') == bearing_id:
-                            external_status = b.get('statusName', 'Unknown')
-                            print(f"[FFT API] ✓ External status for bearing {bearing_id[-8:]}: {external_status}", flush=True)
-                            logging.info(f"Found external status for bearing {bearing_id}: {external_status}")
+                db_bearings = await fetch_bearings_from_mongodb(machine_id)
+                if db_bearings:
+                    for b in db_bearings:
+                        b_id = str(b.get('_id', ''))
+                        if b_id == bearing_id or b.get('bearingLocationId') == bearing_id:
+                            external_status = b.get('statusName') or b.get('status', 'Unknown')
+                            status_source = "mongodb"
+                            print(f"[FFT API] ✓ Found status in MongoDB for bearing {bearing_id[-8:]}: {external_status}", flush=True)
+                            logging.info(f"Found bearing status in MongoDB: {external_status}")
                             break
-                    if not external_status:
-                        print(f"[FFT API] ⚠ Bearing {bearing_id[-8:]} not found in BearingLocation response", flush=True)
             except Exception as e:
-                print(f"[FFT API] ❌ Failed to fetch external status: {e}", flush=True)
-                logging.warning(f"Failed to fetch external bearing status: {e}")
+                logging.debug(f"MongoDB bearing lookup failed: {e}")
+            
+            # Step 2: Fallback to external API if not found in MongoDB
+            if not external_status:
+                print(f"[FFT API] MongoDB lookup empty, trying external API...")
+                print(f"[FFT API] URL: {BEARING_URL}")
+                print(f"[FFT API] Request: machineId={machine_id}")
+                try:
+                    bearing_response = await client.post(
+                        BEARING_URL, 
+                        headers=HEADERS, 
+                        json={"machineId": machine_id}
+                    )
+                    print(f"[FFT API] BearingLocation Response Status: {bearing_response.status_code}", flush=True)
+                    if bearing_response.status_code == 200:
+                        bearings_data = bearing_response.json()
+                        print(f"[FFT API] Found {len(bearings_data)} bearings from API", flush=True)
+                        # Find the specific bearing
+                        for b in bearings_data:
+                            if b.get('_id') == bearing_id:
+                                external_status = b.get('statusName', 'Unknown')
+                                status_source = "api"
+                                print(f"[FFT API] ✓ External status for bearing {bearing_id[-8:]}: {external_status}", flush=True)
+                                logging.info(f"Found external status for bearing {bearing_id}: {external_status}")
+                                break
+                        if not external_status:
+                            print(f"[FFT API] ⚠ Bearing {bearing_id[-8:]} not found in BearingLocation response", flush=True)
+                except Exception as e:
+                    print(f"[FFT API] ❌ Failed to fetch external status: {e}", flush=True)
+                    logging.warning(f"Failed to fetch external bearing status: {e}")
+        
         
         print(f"\n{'='*60}", flush=True)
         print(f"[FFT API] Analysis complete for machine={machine_id[-8:]}, bearing={bearing_id[-8:]}", flush=True)
