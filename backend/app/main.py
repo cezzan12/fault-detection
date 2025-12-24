@@ -8,11 +8,11 @@ import asyncio
 
 # Support both absolute and relative imports
 try:
-    from app.routers import machines, stats, sync
+    from app.routers import machines, stats, sync, report
     from app.database import connect_to_database, close_database_connection, get_database
     from app.services.sync_service import sync_last_n_days
 except ImportError:
-    from routers import machines, stats, sync
+    from routers import machines, stats, sync, report
     from database import connect_to_database, close_database_connection, get_database
     from services.sync_service import sync_last_n_days
 
@@ -110,6 +110,7 @@ app.add_middleware(
 app.include_router(machines.router, prefix="", tags=["Machines"])
 app.include_router(stats.router, prefix="/stats", tags=["Stats"])
 app.include_router(sync.router, prefix="/sync", tags=["Sync"])
+app.include_router(report.router, prefix="", tags=["Reports"])
 
 # ------------------- Home Endpoint -------------------
 @app.get("/")
