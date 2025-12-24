@@ -49,8 +49,8 @@ async def lifespan(app: FastAPI):
     print("🚀 Starting up...")
     try:
         await connect_to_database()
-        # Auto-sync today's data after database connection
-        await auto_sync_on_startup()
+        # Auto-sync DISABLED - read-only mode for AWS database
+        # await auto_sync_on_startup()
     except Exception as e:
         print(f"⚠️ MongoDB connection failed: {e}")
         print("⚠️ App will run but database features won't work")

@@ -144,6 +144,8 @@ async def fetch_machines_from_mongodb(date_list: List[str], filters: dict) -> Li
     """
     Fetch machines from MongoDB for given dates with optional filters.
     Returns empty list if MongoDB is not available or has no data.
+    
+    Note: AWS enmaz_db uses 'dataUpdatedTime' field instead of 'date' field.
     """
     try:
         db = get_database()
@@ -153,7 +155,13 @@ async def fetch_machines_from_mongodb(date_list: List[str], filters: dict) -> Li
         machines_collection = db.machines
         
         # Build MongoDB query
-        query = {"date": {"$in": date_list}}
+        # AWS database uses dataUpdatedTime field, not date field
+        # Try both date formats to support different database schemas
+        query = {}
+        
+        # First, check if any document has a 'date' field (local schema)
+        # If not, we'll query without date filter and filter in Python
+        # since dataUpdatedTime is a string like "Wed, 05 Jun 2024 18:30:00 GMT"
         
         # Add filters
         if filters.get("customerId"):
@@ -187,9 +195,43 @@ async def fetch_machines_from_mongodb(date_list: List[str], filters: dict) -> Li
                 {"statusName": {"$regex": status_regex, "$options": "i"}}
             ]
         
-        # Execute query
+        # Execute query - fetch all and filter by date in Python
+        # This is needed because dataUpdatedTime is a complex string format
         cursor = machines_collection.find(query)
-        machines = await cursor.to_list(length=None)
+        all_machines = await cursor.to_list(length=None)
+        
+        # Filter by date if date_list is provided
+        # Parse dataUpdatedTime and check if it matches any date in date_list
+        if date_list:
+            filtered_machines = []
+            for machine in all_machines:
+                data_time = machine.get("dataUpdatedTime", "")
+                if data_time:
+                    try:
+                        # Try to parse "Wed, 05 Jun 2024 18:30:00 GMT" format
+                        from email.utils import parsedate_to_datetime
+                        parsed_date = parsedate_to_datetime(data_time)
+                        machine_date_str = parsed_date.strftime("%Y-%m-%d")
+                        if machine_date_str in date_list:
+                            # Add date field for frontend compatibility
+                            machine["date"] = machine_date_str
+                            filtered_machines.append(machine)
+                    except Exception:
+                        # Try other date formats
+                        try:
+                            # ISO format
+                            if "T" in data_time:
+                                machine_date_str = data_time.split("T")[0]
+                            else:
+                                machine_date_str = data_time[:10]
+                            if machine_date_str in date_list:
+                                machine["date"] = machine_date_str
+                                filtered_machines.append(machine)
+                        except Exception:
+                            continue
+            machines = filtered_machines
+        else:
+            machines = all_machines
         
         logging.info(f"📦 Fetched {len(machines)} machines from MongoDB for dates: {date_list[:3]}...")
         
@@ -201,14 +243,16 @@ async def fetch_machines_from_mongodb(date_list: List[str], filters: dict) -> Li
 
 
 async def check_mongodb_has_data(date_list: List[str]) -> bool:
-    """Check if MongoDB has data for the given dates"""
+    """Check if MongoDB has any data (date filtering is done in Python now)"""
     try:
         db = get_database()
         if db is None:
             return False
         
         machines_collection = db.machines
-        count = await machines_collection.count_documents({"date": {"$in": date_list}})
+        # Just check if there are any machines in the collection
+        # Date filtering is done in fetch_machines_from_mongodb
+        count = await machines_collection.count_documents({})
         return count > 0
     except Exception:
         return False

@@ -82,6 +82,10 @@ const fetchApi = async (endpoint, options = {}) => {
 // ==========================================
 
 export const triggerAutoSync = async () => {
+  // DISABLED: Read-only mode - do not sync to AWS database
+  console.log('[API] Auto-sync DISABLED - running in read-only mode');
+  return { needs_sync: false, message: 'Sync disabled - read-only mode' };
+  /*
   try {
     const response = await fetch(`${API_BASE_URL}/sync/auto`, {
       method: 'POST',
@@ -92,6 +96,7 @@ export const triggerAutoSync = async () => {
     console.warn('[API] Auto-sync failed (non-blocking):', error.message);
     return { needs_sync: false, message: 'Sync unavailable' };
   }
+  */
 };
 
 export const getSyncStatus = async () => {
@@ -99,19 +104,15 @@ export const getSyncStatus = async () => {
 };
 
 export const syncToday = async () => {
-  const response = await fetch(`${API_BASE_URL}/sync/today`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' }
-  });
-  return await response.json();
+  // DISABLED: Read-only mode
+  console.log('[API] syncToday DISABLED - running in read-only mode');
+  return { message: 'Sync disabled - read-only mode', synced: 0 };
 };
 
 export const syncRecent = async (days = 7) => {
-  const response = await fetch(`${API_BASE_URL}/sync/recent?days=${days}`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' }
-  });
-  return await response.json();
+  // DISABLED: Read-only mode
+  console.log('[API] syncRecent DISABLED - running in read-only mode');
+  return { message: 'Sync disabled - read-only mode', synced: 0 };
 };
 
 // ==========================================
