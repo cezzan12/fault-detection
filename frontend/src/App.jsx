@@ -18,10 +18,10 @@ import {
 } from './data/mockData';
 import {
   fetchMachines,
+  fetchStackedChartData,
   calculateKpiFromMachines,
   extractFilterOptions,
   generateCustomerTrendData,
-  generateStatusTrendData,
   triggerAutoSync
 } from './services/api';
 import './App.css';
@@ -70,7 +70,7 @@ function App() {
   const [machineFilters, setMachineFilters] = useState({
     areaId: 'All',
     status: 'All',
-    customerId: 'All',
+    customerName: 'All',
     fromDate: weekAgo,
     toDate: today,
     searchField: 'autoDetect',
@@ -82,7 +82,7 @@ function App() {
     fromDate: weekAgo,
     toDate: today,
     status: 'All',
-    customerId: 'All'
+    customerName: 'All'
   });
 
   // ==========================================
@@ -112,7 +112,7 @@ function App() {
         date_from: filters.fromDate,
         date_to: filters.toDate,
         status: filters.status,
-        customerId: filters.customerId,
+        customerId: filters.customerName,
         limit: 500
       });
 
@@ -125,18 +125,74 @@ function App() {
         const kpi = calculateKpiFromMachines(machines);
         setKpiData(kpi);
 
-        // Generate trend data (limited processing)
+        // Generate customer trend data (limited processing)
         const customerTrends = generateCustomerTrendData(machines.slice(0, 200));
         setCustomerTrendData(customerTrends);
-
-        const statusTrends = generateStatusTrendData(machines.slice(0, 200));
-        setStatusTrendData(statusTrends);
 
         // Extract filter options
         const filterOpts = extractFilterOptions(machines);
         setAreaOptions(filterOpts.areaOptions);
         setCustomerOptions(filterOpts.customerOptions);
       }, 0);
+
+      // Fetch status trend data from backend API (separate call for accurate counts)
+      try {
+        const statsResponse = await fetchStackedChartData(
+          filters.fromDate,
+          filters.toDate,
+          'daily',
+          filters.customerName !== 'All' ? filters.customerName : null
+        );
+
+        console.log('[Dashboard] Stats API response:', statsResponse);
+
+        // Transform backend response format to chart format
+        // Backend returns: {dates: [...], statuses: {Normal: [...], Satisfactory: [...], ...}}
+        // Chart expects: [{date: "2025-12-18", normal: 65, satisfactory: 10, ...}, ...]
+        if (statsResponse.dates && statsResponse.statuses) {
+          const transformedStatusTrends = statsResponse.dates.map((date, index) => ({
+            date,
+            normal: statsResponse.statuses.Normal?.[index] || 0,
+            satisfactory: statsResponse.statuses.Satisfactory?.[index] || 0,
+            alert: statsResponse.statuses.Alert?.[index] || 0,
+            unacceptable: statsResponse.statuses.Unacceptable?.[index] || 0
+          }));
+          setStatusTrendData(transformedStatusTrends);
+          console.log('[Dashboard] Transformed status trends:', transformedStatusTrends);
+        } else {
+          console.warn('[Dashboard] Stats API returned unexpected format:', statsResponse);
+          setStatusTrendData([]);
+        }
+      } catch (statsError) {
+        console.error('[Dashboard] Failed to fetch stats from backend:', statsError);
+        // Fallback to client-side generation if stats API fails
+        const fallbackStatusTrends = [];
+        const dateStatusMap = {};
+        machines.forEach(machine => {
+          let dateStr = 'Unknown';
+          if (machine.dataUpdatedTime && machine.dataUpdatedTime !== 'N/A') {
+            try {
+              const date = new Date(machine.dataUpdatedTime);
+              dateStr = date.toISOString().split('T')[0];
+            } catch (e) {
+              dateStr = machine.dataUpdatedTime.split('T')[0];
+            }
+          }
+          const status = (machine.statusName || machine.status || 'unknown').toLowerCase();
+          if (!dateStatusMap[dateStr]) {
+            dateStatusMap[dateStr] = { normal: 0, satisfactory: 0, alert: 0, unacceptable: 0 };
+          }
+          if (status === 'normal') dateStatusMap[dateStr].normal++;
+          else if (status === 'satisfactory') dateStatusMap[dateStr].satisfactory++;
+          else if (status === 'alert') dateStatusMap[dateStr].alert++;
+          else if (status === 'unacceptable' || status === 'unsatisfactory') dateStatusMap[dateStr].unacceptable++;
+        });
+        Object.entries(dateStatusMap).forEach(([date, statuses]) => {
+          fallbackStatusTrends.push({ date, ...statuses });
+        });
+        fallbackStatusTrends.sort((a, b) => a.date.localeCompare(b.date));
+        setStatusTrendData(fallbackStatusTrends);
+      }
 
     } catch (error) {
       console.error('Failed to fetch dashboard data:', error);
@@ -171,8 +227,8 @@ function App() {
       };
 
       // Only add filters if they are not 'All'
-      if (filters.customerId && filters.customerId !== 'All') {
-        apiFilters.customerId = filters.customerId;
+      if (filters.customerName && filters.customerName !== 'All') {
+        apiFilters.customerName = filters.customerName;
       }
       if (filters.areaId && filters.areaId !== 'All') {
         apiFilters.areaId = filters.areaId;
@@ -309,7 +365,7 @@ function App() {
     const cleanFilters = {
       areaId: filters.areaId || 'All',
       status: filters.status || 'All',
-      customerId: filters.customerId || 'All',
+      customerName: filters.customerName || 'All',
       fromDate: filters.fromDate,
       toDate: filters.toDate,
       // Include search parameters
@@ -331,7 +387,7 @@ function App() {
     // Set machine filters with the clicked date and status
     const newFilters = {
       areaId: 'All',
-      customerId: 'All',
+      customerName: 'All',
       status: status,
       fromDate: date,
       toDate: date

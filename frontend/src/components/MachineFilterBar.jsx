@@ -14,8 +14,8 @@ const SEARCH_FIELDS = [
   { value: 'autoDetect', label: 'Auto Detect', icon: Sparkles },
   { value: 'machineName', label: 'Machine Name', icon: Cpu },
   { value: 'machineId', label: 'Machine ID', icon: Hash },
-  { value: 'customerId', label: 'Customer Name', icon: Users },
-  { value: 'areaId', label: 'Area Name', icon: MapPin }
+  { value: 'customerName', label: 'Customer Name', icon: Users },
+  { value: 'areaId', label: 'Area ID', icon: MapPin }
 ];
 
 const MachineFilterBar = ({
@@ -35,7 +35,7 @@ const MachineFilterBar = ({
   const [filters, setFilters] = useState({
     areaId: initialFilters.areaId || 'All',
     status: initialFilters.status || 'All',
-    customerId: initialFilters.customerId || 'All',
+    customerName: initialFilters.customerName || 'All',
     fromDate: initialFilters.fromDate || weekAgo,
     toDate: initialFilters.toDate || today
   });
@@ -50,7 +50,7 @@ const MachineFilterBar = ({
       const newFilters = {
         areaId: initialFilters.areaId || 'All',
         status: initialFilters.status || 'All',
-        customerId: initialFilters.customerId || 'All',
+        customerName: initialFilters.customerName || 'All',
         fromDate: initialFilters.fromDate || weekAgo,
         toDate: initialFilters.toDate || today
       };
@@ -63,7 +63,7 @@ const MachineFilterBar = ({
         setSearchQuery(initialFilters.searchQuery || '');
       }
     }
-  }, [initialFilters.areaId, initialFilters.status, initialFilters.customerId, initialFilters.fromDate, initialFilters.toDate, initialFilters.searchField, initialFilters.searchQuery]);
+  }, [initialFilters.areaId, initialFilters.status, initialFilters.customerName, initialFilters.fromDate, initialFilters.toDate, initialFilters.searchField, initialFilters.searchQuery]);
 
   // Close suggestions when clicking outside
   useEffect(() => {
@@ -86,7 +86,7 @@ const MachineFilterBar = ({
     const matches = {
       machineName: machinesData.some(m => (m.machineName || '').toLowerCase().includes(q)),
       machineId: machinesData.some(m => (m.machineId || '').toLowerCase().includes(q)),
-      customerId: machinesData.some(m => (m.customerId || '').toLowerCase().includes(q)),
+      customerName: machinesData.some(m => (m.customerName || '').toLowerCase().includes(q)),
       areaId: machinesData.some(m => (m.areaId || '').toLowerCase().includes(q))
     };
 
@@ -102,7 +102,7 @@ const MachineFilterBar = ({
     if (/^[a-f0-9]{20,}$/i.test(q)) {
       // MongoDB ObjectId pattern
       if (matches.machineId) return 'machineId';
-      if (matches.customerId) return 'customerId';
+      if (matches.customerName) return 'customerName';
     }
 
     return matchingFields[0] || null;
@@ -120,7 +120,7 @@ const MachineFilterBar = ({
 
     if (searchField === 'autoDetect') {
       // Search all fields and group by type
-      const fieldTypes = ['machineName', 'machineId', 'customerId', 'areaId'];
+      const fieldTypes = ['machineName', 'machineId', 'customerName', 'areaId'];
 
       fieldTypes.forEach(field => {
         machinesData.forEach(machine => {
@@ -140,7 +140,7 @@ const MachineFilterBar = ({
 
       // Sort by field type, then alphabetically
       results.sort((a, b) => {
-        const fieldOrder = { machineName: 0, machineId: 1, customerId: 2, areaId: 3 };
+        const fieldOrder = { machineName: 0, machineId: 1, customerName: 2, areaId: 3 };
         if (fieldOrder[a.field] !== fieldOrder[b.field]) {
           return fieldOrder[a.field] - fieldOrder[b.field];
         }
@@ -237,7 +237,7 @@ const MachineFilterBar = ({
     const resetFilters = {
       areaId: 'All',
       status: 'All',
-      customerId: 'All',
+      customerName: 'All',
       fromDate: weekAgo,
       toDate: today
     };
@@ -404,11 +404,11 @@ const MachineFilterBar = ({
           <div className="filter-group">
             <label className="filter-label">
               <Users size={14} />
-              Customer
+              Customer Name
             </label>
             <select
-              value={filters.customerId}
-              onChange={(e) => handleChange('customerId', e.target.value)}
+              value={filters.customerName}
+              onChange={(e) => handleChange('customerName', e.target.value)}
               className="filter-select"
             >
               {customerOptions.map(customer => (

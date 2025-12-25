@@ -237,8 +237,10 @@ export const extractFilterOptions = (machines = []) => {
     if (machine.areaId && machine.areaId !== 'N/A') {
       areas.add(machine.areaId);
     }
-    if (machine.customerId && machine.customerId !== 'N/A') {
-      customers.add(machine.customerId);
+    // Use customerName for display, fall back to customerId if name not available
+    const customerName = machine.customerName || machine.customerId;
+    if (customerName && customerName !== 'N/A') {
+      customers.add(customerName);
     }
   });
 
@@ -253,26 +255,38 @@ export const generateCustomerTrendData = (machines = []) => {
   const dateCustomerMap = {};
 
   machines.forEach(machine => {
-    // Extract date from dataUpdatedTime or use a fallback
+    // Extract date from multiple possible sources
     let dateStr = 'Unknown';
-    if (machine.dataUpdatedTime && machine.dataUpdatedTime !== 'N/A') {
+
+    // Try 'date' field first (from transformed data)
+    if (machine.date && machine.date !== 'N/A') {
+      dateStr = machine.date;
+    }
+    // Fallback to dataUpdatedTime
+    else if (machine.dataUpdatedTime && machine.dataUpdatedTime !== 'N/A') {
       try {
         const date = new Date(machine.dataUpdatedTime);
-        dateStr = date.toISOString().split('T')[0];
+        if (!isNaN(date.getTime())) {
+          dateStr = date.toISOString().split('T')[0];
+        }
       } catch (e) {
-        dateStr = machine.dataUpdatedTime.split('T')[0];
+        // Try to extract date string directly
+        if (typeof machine.dataUpdatedTime === 'string' && machine.dataUpdatedTime.includes('-')) {
+          dateStr = machine.dataUpdatedTime.split('T')[0];
+        }
       }
     }
 
-    const customerId = machine.customerId || 'Unknown';
+    // Use customerName instead of customerId for display
+    const customerName = machine.customerName || machine.customerId || 'Unknown';
 
     if (!dateCustomerMap[dateStr]) {
       dateCustomerMap[dateStr] = {};
     }
-    if (!dateCustomerMap[dateStr][customerId]) {
-      dateCustomerMap[dateStr][customerId] = 0;
+    if (!dateCustomerMap[dateStr][customerName]) {
+      dateCustomerMap[dateStr][customerName] = 0;
     }
-    dateCustomerMap[dateStr][customerId]++;
+    dateCustomerMap[dateStr][customerName]++;
   });
 
   // Convert to array format for Recharts

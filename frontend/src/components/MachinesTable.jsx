@@ -55,7 +55,7 @@ const MachinesTable = ({ data = [], filters, loading = false, error = null, onMa
 
       if (filters.areaId && filters.areaId !== 'All' && machine.areaId !== filters.areaId) return false;
       if (filters.status && filters.status !== 'All' && machineStatus !== filterStatus) return false;
-      if (filters.customerId && filters.customerId !== 'All' && machine.customerId !== filters.customerId) return false;
+      if (filters.customerName && filters.customerName !== 'All' && machine.customerName !== filters.customerName) return false;
       if (filters.fromDate && machine.date && machine.date < filters.fromDate) return false;
       if (filters.toDate && machine.date && machine.date > filters.toDate) return false;
 
@@ -88,7 +88,7 @@ const MachinesTable = ({ data = [], filters, loading = false, error = null, onMa
             case 'machineId':
               fieldValue = (machine.machineId || '').toLowerCase();
               break;
-            case 'customerId':
+            case 'customerName':
               fieldValue = (machine.customerName || machine.customerId || '').toLowerCase();
               break;
             case 'areaId':
