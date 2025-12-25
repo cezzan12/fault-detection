@@ -143,6 +143,7 @@ class BearingDataRequest(BaseModel):
 async def fetch_machines_from_mongodb(date_list: List[str], filters: dict) -> List[dict]:
     """
     Fetch machines from MongoDB for given dates with optional filters.
+    Uses $lookup to join with customers collection for customer names.
     Returns empty list if MongoDB is not available or has no data.
     
     Note: AWS enmaz_db uses 'dataUpdatedTime' field instead of 'date' field.
@@ -154,30 +155,24 @@ async def fetch_machines_from_mongodb(date_list: List[str], filters: dict) -> Li
         
         machines_collection = db.machines
         
-        # Build MongoDB query
-        # AWS database uses dataUpdatedTime field, not date field
-        # Try both date formats to support different database schemas
-        query = {}
-        
-        # First, check if any document has a 'date' field (local schema)
-        # If not, we'll query without date filter and filter in Python
-        # since dataUpdatedTime is a string like "Wed, 05 Jun 2024 18:30:00 GMT"
+        # Build MongoDB match query
+        match_query = {}
         
         # Add filters
         if filters.get("customerId"):
-            query["customerId"] = {"$regex": f"^{filters['customerId']}$", "$options": "i"}
+            match_query["customerId"] = {"$regex": f"^{filters['customerId']}$", "$options": "i"}
         if filters.get("areaId"):
-            query["areaId"] = {"$regex": f"^{filters['areaId']}$", "$options": "i"}
+            match_query["areaId"] = {"$regex": f"^{filters['areaId']}$", "$options": "i"}
         if filters.get("subAreaId"):
-            query["subAreaId"] = {"$regex": f"^{filters['subAreaId']}$", "$options": "i"}
+            match_query["subAreaId"] = {"$regex": f"^{filters['subAreaId']}$", "$options": "i"}
         if filters.get("machineType"):
-            query["machineType"] = {"$regex": f"^{filters['machineType']}$", "$options": "i"}
+            match_query["machineType"] = {"$regex": f"^{filters['machineType']}$", "$options": "i"}
         if filters.get("statusId"):
-            query["statusId"] = {"$regex": f"^{filters['statusId']}$", "$options": "i"}
+            match_query["statusId"] = {"$regex": f"^{filters['statusId']}$", "$options": "i"}
         if filters.get("technologyId"):
-            query["technologyId"] = {"$regex": f"^{filters['technologyId']}$", "$options": "i"}
+            match_query["technologyId"] = {"$regex": f"^{filters['technologyId']}$", "$options": "i"}
         if filters.get("name"):
-            query["name"] = {"$regex": f"^{filters['name']}$", "$options": "i"}
+            match_query["name"] = {"$regex": f"^{filters['name']}$", "$options": "i"}
         
         # Handle status/statusName filter
         status_filter = filters.get("statusName") or filters.get("status")
@@ -190,15 +185,51 @@ async def fetch_machines_from_mongodb(date_list: List[str], filters: dict) -> Li
                 status_variations.append('Unsatisfactory')
             
             status_regex = '|'.join([f"^{s}$" for s in status_variations])
-            query["$or"] = [
+            match_query["$or"] = [
                 {"status": {"$regex": status_regex, "$options": "i"}},
                 {"statusName": {"$regex": status_regex, "$options": "i"}}
             ]
         
-        # Execute query - fetch all and filter by date in Python
-        # This is needed because dataUpdatedTime is a complex string format
-        cursor = machines_collection.find(query)
-        all_machines = await cursor.to_list(length=None)
+        # Try aggregation pipeline with $lookup for customer names
+        try:
+            from bson.objectid import ObjectId
+            
+            pipeline = [
+                # Match filter conditions first
+                {"$match": match_query} if match_query else {"$match": {}},
+                # Lookup customer names from customers collection
+                {
+                    "$lookup": {
+                        "from": "customers",
+                        "localField": "customer",
+                        "foreignField": "_id",
+                        "as": "customerInfo"
+                    }
+                },
+                # Add customerName field from lookup result
+                {
+                    "$addFields": {
+                        "customerName": {
+                            "$ifNull": [
+                                {"$arrayElemAt": ["$customerInfo.name", 0]},
+                                "$customerName"  # Keep existing if lookup fails
+                            ]
+                        }
+                    }
+                },
+                # Remove the temporary customerInfo array
+                {"$project": {"customerInfo": 0}}
+            ]
+            
+            cursor = machines_collection.aggregate(pipeline)
+            all_machines = await cursor.to_list(length=None)
+            logging.info(f"📦 Aggregation pipeline returned {len(all_machines)} machines")
+            
+        except Exception as agg_error:
+            logging.warning(f"Aggregation failed, falling back to simple find: {agg_error}")
+            # Fallback to simple find if aggregation fails
+            cursor = machines_collection.find(match_query if match_query else {})
+            all_machines = await cursor.to_list(length=None)
         
         # Filter by date if date_list is provided
         # Parse dataUpdatedTime and check if it matches any date in date_list

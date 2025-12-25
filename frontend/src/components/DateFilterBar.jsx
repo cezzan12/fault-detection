@@ -9,29 +9,29 @@ const getDefaultDates = () => {
   return { today, weekAgo };
 };
 
-const DateFilterBar = ({ 
+const DateFilterBar = ({
   onApplyFilter,
   statusOptions = ['All', 'Normal', 'Satisfactory', 'Alert', 'Unacceptable'],
   customerOptions = ['All'],
   initialFilters = {}
 }) => {
   const { today, weekAgo } = getDefaultDates();
-  
+
   const [fromDate, setFromDate] = useState(initialFilters.fromDate || weekAgo);
   const [toDate, setToDate] = useState(initialFilters.toDate || today);
   const [status, setStatus] = useState(initialFilters.status || 'All');
-  const [customerId, setCustomerId] = useState(initialFilters.customerId || 'All');
+  const [customerName, setCustomerName] = useState(initialFilters.customerName || 'All');
 
   // Update local state when initialFilters change
   useEffect(() => {
     if (initialFilters.fromDate) setFromDate(initialFilters.fromDate);
     if (initialFilters.toDate) setToDate(initialFilters.toDate);
     if (initialFilters.status) setStatus(initialFilters.status);
-    if (initialFilters.customerId) setCustomerId(initialFilters.customerId);
+    if (initialFilters.customerName) setCustomerName(initialFilters.customerName);
   }, [initialFilters]);
 
   const handleApply = () => {
-    const filters = { fromDate, toDate, status, customerId };
+    const filters = { fromDate, toDate, status, customerName };
     console.log('Applying dashboard filters:', filters);
     if (onApplyFilter) {
       onApplyFilter(filters);
@@ -43,10 +43,10 @@ const DateFilterBar = ({
     setFromDate(weekAgo);
     setToDate(today);
     setStatus('All');
-    setCustomerId('All');
+    setCustomerName('All');
     console.log('Filters reset');
     if (onApplyFilter) {
-      onApplyFilter({ fromDate: weekAgo, toDate: today, status: 'All', customerId: 'All' });
+      onApplyFilter({ fromDate: weekAgo, toDate: today, status: 'All', customerName: 'All' });
     }
   };
 
@@ -56,7 +56,7 @@ const DateFilterBar = ({
     setToDate(today);
     console.log('Filtering for today:', today);
     if (onApplyFilter) {
-      onApplyFilter({ fromDate: today, toDate: today, status, customerId });
+      onApplyFilter({ fromDate: today, toDate: today, status, customerName });
     }
   };
 
@@ -68,7 +68,7 @@ const DateFilterBar = ({
           <span>Filters</span>
         </div>
       </div>
-      
+
       <div className="filter-bar-content">
         <div className="filter-group">
           <label className="filter-label">From Date</label>
@@ -114,8 +114,8 @@ const DateFilterBar = ({
         <div className="filter-group">
           <label className="filter-label">Customer</label>
           <select
-            value={customerId}
-            onChange={(e) => setCustomerId(e.target.value)}
+            value={customerName}
+            onChange={(e) => setCustomerName(e.target.value)}
             className="filter-select"
           >
             {customerOptions.map(c => (

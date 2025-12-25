@@ -259,7 +259,7 @@ const MachineDetail = ({ machineId, machineInfo, onBack }) => {
               <MapPin size={20} />
             </div>
             <div className="info-content">
-              <span className="info-label">AREA ID</span>
+              <span className="info-label">AREA</span>
               <CopyableId value={machine.areaId || 'N/A'} label="Area ID" />
             </div>
           </div>
@@ -269,7 +269,7 @@ const MachineDetail = ({ machineId, machineInfo, onBack }) => {
               <Layers size={20} />
             </div>
             <div className="info-content">
-              <span className="info-label">SUBAREA ID</span>
+              <span className="info-label">SUBAREA</span>
               <CopyableId value={machine.subareaId || machine.subAreaId || 'N/A'} label="Subarea ID" />
             </div>
           </div>
@@ -328,13 +328,6 @@ const MachineDetail = ({ machineId, machineInfo, onBack }) => {
                         <StatusBadge status={bearingStatus} />
                       </td>
                       <td className="actions-cell">
-                        <button
-                          className="btn btn-primary btn-sm"
-                          onClick={() => handleShowCharts(bearing)}
-                        >
-                          <BarChart3 size={14} />
-                          Show Charts
-                        </button>
                         <button
                           className="btn btn-success btn-sm"
                           onClick={() => {
