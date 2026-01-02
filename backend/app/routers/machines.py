@@ -142,23 +142,131 @@ class BearingDataRequest(BaseModel):
 # ------------------- Helper: Fetch from MongoDB -------------------
 async def fetch_machines_from_mongodb(date_list: List[str], filters: dict) -> List[dict]:
     """
-    Fetch machines from MongoDB for given dates with optional filters.
-    Uses $lookup to join with customers collection for customer names.
-    Returns empty list if MongoDB is not available or has no data.
-    
-    Note: AWS enmaz_db uses 'dataUpdatedTime' field instead of 'date' field.
+    Fetch machines by first looking up 'machine_dates' for the requested dates,
+    then joining with 'machines' collection for details.
     """
     try:
         db = get_database()
         if db is None:
             return []
         
-        machines_collection = db.machines
+        # Collections
+        machine_dates_col = db["machine_dates"]
+        machines_col = db.machines
         
-        # Build MongoDB match query
+        # 1. Identify relevant Machine IDs + Dates from 'machine_dates'
+        #    This table links machines to specific dates/times.
+        
+        fetched_date_records = []
+        
+        if date_list:
+            # Build query for machine_dates
+            # Handle mixed schema: 'date' field OR 'dataUpdatedTime' regex
+            
+            date_conditions = [{"date": {"$in": date_list}}]
+            
+            # Create regex pattern for dataUpdatedTime (YYYY-MM-DD -> DD Mon YYYY)
+            date_regex_parts = []
+            for d_str in date_list:
+                try:
+                    d_obj = datetime.strptime(d_str, "%Y-%m-%d")
+                    # Match "24 Dec 2025" or similar
+                    date_regex_parts.append(d_obj.strftime("%d %b %Y"))
+                except:
+                    continue
+            
+            if date_regex_parts:
+                joined_regex = "|".join(date_regex_parts)
+                date_conditions.append({
+                    "dataUpdatedTime": {"$regex": joined_regex}
+                })
+            
+            date_query = {"$or": date_conditions}
+            
+            logging.info(f"🔎 Querying machine_dates with: {len(date_list)} dates")
+            try:
+                # Fetch only necessary fields
+                cursor = machine_dates_col.find(date_query, {"machineId": 1, "date": 1, "dataUpdatedTime": 1})
+                fetched_date_records = await cursor.to_list(length=None)
+            except Exception as e:
+                logging.error(f"Failed to query machine_dates: {e}")
+                return []
+                
+        else:
+            # If no date filters, this approach might be too heavy if we query all history.
+            # But the caller (get_machines) usually defaults to "today" if no date is given.
+            # If we truly reach here empty, implies "get all machines ever".
+            # For safety, let's just return empty or fetch master list?
+            # User logic implies `machine_dates` is the driver.
+            # Let's assume date_query is always active via get_machines defaults.
+            return []
+
+        if not fetched_date_records:
+            logging.info("⚠️ No records found in machine_dates for requested dates")
+            return []
+
+        # 2. Extract IDs and Prepare Date Mapping
+        target_machine_ids = []
+        # List of tuples: (machineId, normalized_date_string)
+        machine_events = [] 
+        
+        from email.utils import parsedate_to_datetime
+
+        for rec in fetched_date_records:
+            m_id = rec.get("machineId")
+            if not m_id:
+                continue
+                
+            # Normalize Date
+            final_date = rec.get("date")
+            if not final_date:
+                # Try parsing dataUpdatedTime
+                raw_time = rec.get("dataUpdatedTime")
+                if raw_time:
+                    try:
+                        # Try email format first (Wed, 24 Dec 2025...)
+                        try:
+                            pd = parsedate_to_datetime(raw_time)
+                            final_date = pd.strftime("%Y-%m-%d")
+                        except:
+                            # Try simple T split or ISO
+                            if "T" in str(raw_time):
+                                final_date = str(raw_time).split("T")[0]
+                            else:
+                                final_date = str(raw_time)[:10] # Crude fallback
+                    except:
+                        pass
+            
+            if final_date:
+                machine_events.append((m_id, final_date))
+                target_machine_ids.append(m_id)
+
+        # Deduplicate IDs for the machines query
+        unique_ids = list(set(target_machine_ids))
+        logging.info(f"📄 Found {len(fetched_date_records)} events, {len(unique_ids)} unique machines")
+
+        # 3. Fetch Machine Details from 'machines' (Master)
+        #    Apply other filters (customer, status, etc.) here
+        
+        # Prepare IDs for query - support both String and ObjectId format to be safe
+        query_ids = list(unique_ids)
+        try:
+            from bson.objectid import ObjectId
+            for uid in unique_ids:
+                if isinstance(uid, str) and len(uid) == 24:
+                    try:
+                        query_ids.append(ObjectId(uid))
+                    except:
+                        pass
+        except ImportError:
+            pass
+
         match_query = {}
+        # Filter by the IDs we found active on these dates
+        # User confirmed: machine_dates.machineId maps to machines._id
+        match_query["_id"] = {"$in": query_ids}
         
-        # Add filters
+        # Add other user filters (customer, area, etc.)
         if filters.get("customerId"):
             match_query["customerId"] = {"$regex": f"^{filters['customerId']}$", "$options": "i"}
         if filters.get("areaId"):
@@ -173,11 +281,10 @@ async def fetch_machines_from_mongodb(date_list: List[str], filters: dict) -> Li
             match_query["technologyId"] = {"$regex": f"^{filters['technologyId']}$", "$options": "i"}
         if filters.get("name"):
             match_query["name"] = {"$regex": f"^{filters['name']}$", "$options": "i"}
-        
-        # Handle status/statusName filter
+            
+        # Handle status logic
         status_filter = filters.get("statusName") or filters.get("status")
         if status_filter:
-            # Normalize unsatisfactory/unacceptable
             status_variations = [status_filter]
             if status_filter.lower() == 'unsatisfactory':
                 status_variations.append('Unacceptable')
@@ -185,19 +292,17 @@ async def fetch_machines_from_mongodb(date_list: List[str], filters: dict) -> Li
                 status_variations.append('Unsatisfactory')
             
             status_regex = '|'.join([f"^{s}$" for s in status_variations])
-            match_query["$or"] = [
+            if "$or" not in match_query:
+                match_query["$or"] = []
+            match_query["$or"].extend([
                 {"status": {"$regex": status_regex, "$options": "i"}},
                 {"statusName": {"$regex": status_regex, "$options": "i"}}
-            ]
-        
-        # Try aggregation pipeline with $lookup for customer names
+            ])
+
+        # Execute Query with Lookup
         try:
-            from bson.objectid import ObjectId
-            
             pipeline = [
-                # Match filter conditions first
-                {"$match": match_query} if match_query else {"$match": {}},
-                # Lookup customer names from customers collection
+                {"$match": match_query},
                 {
                     "$lookup": {
                         "from": "customers",
@@ -206,68 +311,55 @@ async def fetch_machines_from_mongodb(date_list: List[str], filters: dict) -> Li
                         "as": "customerInfo"
                     }
                 },
-                # Add customerName field from lookup result
                 {
                     "$addFields": {
                         "customerName": {
                             "$ifNull": [
                                 {"$arrayElemAt": ["$customerInfo.name", 0]},
-                                "$customerName"  # Keep existing if lookup fails
+                                "$customerName"
                             ]
                         }
                     }
                 },
-                # Remove the temporary customerInfo array
                 {"$project": {"customerInfo": 0}}
             ]
             
-            cursor = machines_collection.aggregate(pipeline)
-            all_machines = await cursor.to_list(length=None)
-            logging.info(f"📦 Aggregation pipeline returned {len(all_machines)} machines")
+            cursor = machines_col.aggregate(pipeline)
+            master_machines = await cursor.to_list(length=None)
             
-        except Exception as agg_error:
-            logging.warning(f"Aggregation failed, falling back to simple find: {agg_error}")
-            # Fallback to simple find if aggregation fails
-            cursor = machines_collection.find(match_query if match_query else {})
-            all_machines = await cursor.to_list(length=None)
+        except Exception as e:
+            logging.error(f"Failed to fetch master machines: {e}")
+            return []
+
+        # 4. Merge: List Events enirched with Machine Details
+        #    Map: machineId -> details
+        #    Key by str(_id) because machine_events has string IDs
+        master_map = {}
+        for m in master_machines:
+            mid = str(m.get("_id"))
+            master_map[mid] = m
+            
+        final_results = []
         
-        # Filter by date if date_list is provided
-        # Parse dataUpdatedTime and check if it matches any date in date_list
-        if date_list:
-            filtered_machines = []
-            for machine in all_machines:
-                data_time = machine.get("dataUpdatedTime", "")
-                if data_time:
-                    try:
-                        # Try to parse "Wed, 05 Jun 2024 18:30:00 GMT" format
-                        from email.utils import parsedate_to_datetime
-                        parsed_date = parsedate_to_datetime(data_time)
-                        machine_date_str = parsed_date.strftime("%Y-%m-%d")
-                        if machine_date_str in date_list:
-                            # Add date field for frontend compatibility
-                            machine["date"] = machine_date_str
-                            filtered_machines.append(machine)
-                    except Exception:
-                        # Try other date formats
-                        try:
-                            # ISO format
-                            if "T" in data_time:
-                                machine_date_str = data_time.split("T")[0]
-                            else:
-                                machine_date_str = data_time[:10]
-                            if machine_date_str in date_list:
-                                machine["date"] = machine_date_str
-                                filtered_machines.append(machine)
-                        except Exception:
-                            continue
-            machines = filtered_machines
-        else:
-            machines = all_machines
-        
-        logging.info(f"📦 Fetched {len(machines)} machines from MongoDB for dates: {date_list[:3]}...")
-        
-        return machines
-        
+        # Iterate over the EVENTS (from machine_dates) to preserve the historical view
+        # Only include if the machine passed the details filter (e.g. correct customer)
+        for m_id, date_val in machine_events:
+            if m_id in master_map:
+                # Clone the master layout
+                full_machine = master_map[m_id].copy()
+                # Enforce the date from the machine_dates record
+                full_machine["date"] = date_val
+                # Ensure _id is string for JSON serialization consistency
+                full_machine["_id"] = str(full_machine["_id"])
+                # Add machineId field if missing (frontend might expect it)
+                if "machineId" not in full_machine:
+                    full_machine["machineId"] = full_machine["_id"]
+                    
+                final_results.append(full_machine)
+                
+        logging.info(f"✅ Returning {len(final_results)} joined records")
+        return final_results
+
     except Exception as e:
         logging.warning(f"MongoDB fetch failed: {e}")
         return []
@@ -432,153 +524,51 @@ async def get_machines(
                 data_source = "mongodb"
                 logging.info(f"✅ Using MongoDB data: {len(all_machines)} machines")
 
-        # ---------------- Fallback to External API (if no MongoDB data or source=api) ----------------
-        if not all_machines and source != "db":
-            logging.info("📡 Fetching from external API...")
-            
-            async def fetch_machines_for_date(date_str):
-                """Fetch machines for a single date"""
-                try:
-                    # Use shared client for better performance
-                    client = get_http_client()
-                    payload = {"date": date_str}
-                    response = await client.post(MACHINE_URL, headers=HEADERS, json=payload)
-                    
-                    if response.status_code == 200:
-                        try:
-                            data = response.json()
-                            # Handle list response
-                            if isinstance(data, list):
-                                return data
-                            # Handle dict response with machines array
-                            if isinstance(data, dict):
-                                if "machines" in data:
-                                    return data.get("machines", [])
-                                if "data" in data and isinstance(data.get("data"), list):
-                                    return data.get("data", [])
-                            return []
-                        except Exception:
-                            return []
-                    else:
-                        # Non-200 status code
-                        return []
-                except Exception:
-                    # Return empty list on error to not break other parallel requests
-                    return []
+        # ---------------- Fallback to External API (DISABLED) ----------------
+        # User requested to only use DB. If not found in DB, return empty.
+        # if not all_machines and source != "db":
+        #    logging.info("📡 Fetching from external API...")
+        #    # ... (API fetching logic commented out) ...
+
             
             # Fetch all dates in parallel instead of sequentially
-            if len(date_list) > 1:
-                # Use parallel requests for multiple dates
-                try:
-                    tasks = [fetch_machines_for_date(d) for d in date_list]
-                    results = await asyncio.gather(*tasks, return_exceptions=True)
-                    for result in results:
-                        if isinstance(result, list):
-                            all_machines.extend(result)
-                        elif isinstance(result, Exception):
-                            # Continue on individual failures
-                            pass
-                except Exception:
-                    # Fallback to sequential if parallel fails
-                    for d in date_list:
-                        result = await fetch_machines_for_date(d)
-                        if isinstance(result, list):
-                            all_machines.extend(result)
-            else:
-                # Single date - sequential request
-                result = await fetch_machines_for_date(date_list[0])
-                if isinstance(result, list):
-                    all_machines.extend(result)
+            # if len(date_list) > 1:
+            #     # Use parallel requests for multiple dates
+            #     try:
+            #         tasks = [fetch_machines_for_date(d) for d in date_list]
+            #         results = await asyncio.gather(*tasks, return_exceptions=True)
+            #         for result in results:
+            #             if isinstance(result, list):
+            #                 all_machines.extend(result)
+            #             elif isinstance(result, Exception):
+            #                 # Continue on individual failures
+            #                 pass
+            #     except Exception:
+            #         # Fallback to sequential if parallel fails
+            #         for d in date_list:
+            #             result = await fetch_machines_for_date(d)
+            #             if isinstance(result, list):
+            #                 all_machines.extend(result)
+            # else:
+            #     # Single date - sequential request
+            #     result = await fetch_machines_for_date(date_list[0])
+            #     if isinstance(result, list):
+            #         all_machines.extend(result)
 
             # ---------------- Apply Filters (only for API data, MongoDB already filtered) ----------------
-            # If status is provided but statusName is not, use status for statusName filtering
-            effective_statusName = statusName or status
+            # ... (API filtering logic commented out) ...
+            # api_filters = { ... }
+            # ...
+            # if has_filters:
+            #    ...
             
-            api_filters = {
-                "customerId": customerId,
-                "areaId": areaId,
-                "subAreaId": subAreaId,
-                "machineType": machineType,
-                "statusId": statusId,
-                "statusName": effective_statusName,
-                "technologyId": technologyId,
-                "name": name,
-            }
+            # ---------------- Optional: Filter by date range (for API data) ----------------
+            # if date_from and date_to and data_source == "api":
+            #     try:
+            #         ...
+            #     except Exception as e:
+            #         ...
 
-            # Apply all filters in a single pass for better performance
-            # Only filter if at least one filter has a non-empty value
-            has_filters = any(value for value in api_filters.values() if value)
-            
-            if has_filters:
-                filtered_machines = []
-                for m in all_machines:
-                    # Check all filters
-                    match = True
-                    for key, value in api_filters.items():
-                        if value:  # Only check if filter has a value
-                            m_value = str(m.get(key, "")).lower()
-                            filter_value = str(value).lower()
-                            if m_value != filter_value:
-                                match = False
-                                break
-                    
-                    # Also check status/statusName fields if status filter is applied
-                    if match and effective_statusName:
-                        m_status = str(m.get("status", "")).lower()
-                        m_statusName = str(m.get("statusName", "")).lower()
-                        status_lower = str(effective_statusName).lower()
-                        # Match if either status or statusName matches
-                        if m_status != status_lower and m_statusName != status_lower:
-                            match = False
-                    
-                    if match:
-                        filtered_machines.append(m)
-                
-                all_machines = filtered_machines
-
-        # ---------------- Optional: Filter by date range (for API data) ----------------
-        if date_from and date_to and data_source == "api":
-            try:
-                # Parse start date (beginning of day)
-                start = datetime.strptime(date_from, "%Y-%m-%d")
-                # Parse end date (end of day - 23:59:59.999)
-                end = datetime.strptime(date_to, "%Y-%m-%d")
-                end = end.replace(hour=23, minute=59, second=59, microsecond=999999)
-                
-                filtered_by_date = []
-                for m in all_machines:
-                    if "dataUpdatedTime" in m and m["dataUpdatedTime"]:
-                        try:
-                            # Handle different datetime formats
-                            machine_time_str = m["dataUpdatedTime"]
-                            # Try parsing with fromisoformat first (handles ISO format with/without timezone)
-                            try:
-                                machine_time = datetime.fromisoformat(machine_time_str.replace('Z', '+00:00'))
-                            except (ValueError, AttributeError):
-                                # Fallback: try parsing as YYYY-MM-DD or other formats
-                                try:
-                                    # If it's just a date string
-                                    if len(machine_time_str) == 10:
-                                        machine_time = datetime.strptime(machine_time_str, "%Y-%m-%d")
-                                    else:
-                                        # Try parsing with strptime for other formats
-                                        machine_time = datetime.strptime(machine_time_str.split('T')[0], "%Y-%m-%d")
-                                except (ValueError, AttributeError):
-                                    continue
-                            
-                            # Extract just the date part for comparison if needed
-                            # Compare full datetime if available, otherwise compare dates
-                            if start <= machine_time <= end:
-                                filtered_by_date.append(m)
-                        except (ValueError, AttributeError, TypeError):
-                            # Skip machines with invalid date format
-                            continue
-                
-                all_machines = filtered_by_date
-            except Exception as e:
-                # Log error but don't break - continue with unfiltered results
-                logging.warning(f"Error filtering by date range: {e}")
-                pass
 
         # Ensure all required fields are present for every machine
         # Also handle new API format where customer, areaId, subAreaId are nested objects

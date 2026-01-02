@@ -49,6 +49,11 @@ async def lifespan(app: FastAPI):
     print("🚀 Starting up...")
     try:
         await connect_to_database()
+        
+        # Run maintenance tasks to ensure data consistency
+        from app.services.maintenance import fix_missing_dates
+        await fix_missing_dates()
+        
         # Auto-sync DISABLED - read-only mode for AWS database
         # await auto_sync_on_startup()
     except Exception as e:

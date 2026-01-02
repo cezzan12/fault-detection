@@ -64,75 +64,139 @@ async def stacked_chart(
     if db is None:
         return {"dates": [], "statuses": {}, "error": "Database not connected"}
     
+    try:
+        start = datetime.strptime(date_from, "%Y-%m-%d")
+        end = datetime.strptime(date_to, "%Y-%m-%d")
+    except ValueError as e:
+        return {"dates": [], "statuses": {}, "error": f"Invalid date format: {e}"}
+
+    # 1. Generate target dates list
+    target_dates = []
+    curr = start
+    while curr <= end:
+        target_dates.append(curr.strftime("%Y-%m-%d"))
+        curr += timedelta(days=1)
+        
+    if not target_dates:
+         return {"dates": [], "statuses": {}}
+
+    # 2. Query machine_dates
+    machine_dates_col = db["machine_dates"]
+    
+    # robust query for mixed schema
+    date_conditions = [{"date": {"$in": target_dates}}]
+    
+    # Regex for dataUpdatedTime (DD Mon YYYY)
+    date_regex_parts = []
+    for d_str in target_dates:
+        try:
+             d_obj = datetime.strptime(d_str, "%Y-%m-%d")
+             date_regex_parts.append(d_obj.strftime("%d %b %Y"))
+        except:
+             pass
+             
+    if date_regex_parts:
+        # Optimization: chunk regex if too large? 
+        # For a month (30 days), one joined regex is ~350 chars, OK for Mongo.
+        joined_regex = "|".join(date_regex_parts)
+        date_conditions.append({
+            "dataUpdatedTime": {"$regex": joined_regex}
+        })
+        
+    query = {"$or": date_conditions}
+    
+    try:
+        # Fetch machineId, date, dataUpdatedTime
+        cursor = machine_dates_col.find(query, {"machineId": 1, "date": 1, "dataUpdatedTime": 1})
+        machine_date_records = await cursor.to_list(length=None)
+    except Exception as e:
+        return {"dates": [], "statuses": {}, "error": str(e)}
+        
+    # 3. Resolve Machine IDs and Dates
+    unique_machine_ids = set()
+    events = [] # (date, machineId)
+    
     from email.utils import parsedate_to_datetime
     
-    start = datetime.strptime(date_from, "%Y-%m-%d")
-    end = datetime.strptime(date_to, "%Y-%m-%d")
-
-    # Build match query for optional customerId filter
-    match_query = {}
-    if customerId:
-        match_query["customerId"] = customerId
-
-    # Fetch all machines (we'll filter by date in Python due to datetime format)
+    for rec in machine_date_records:
+        mid = rec.get("machineId")
+        if not mid: continue
+        
+        # Normalize date
+        r_date = rec.get("date")
+        if not r_date:
+            raw = rec.get("dataUpdatedTime")
+            if raw:
+                try:
+                    pd = parsedate_to_datetime(raw)
+                    r_date = pd.strftime("%Y-%m-%d")
+                except:
+                    if "T" in str(raw):
+                         r_date = str(raw).split("T")[0]
+                    else:
+                         r_date = str(raw)[:10]
+        
+        if r_date and r_date in target_dates:
+            events.append((r_date, mid))
+            unique_machine_ids.add(mid)
+            
+    # 4. Fetch Machine Statuses (with filtering)
+    machines_col = db.machines
+    
+    # Map IDs to ObjectId if needed
+    query_ids = list(unique_machine_ids)
     try:
-        cursor = db.machines.find(match_query if match_query else {})
-        all_machines = await cursor.to_list(length=None)
+        from bson.objectid import ObjectId
+        for uid in unique_machine_ids:
+             if isinstance(uid, str) and len(uid) == 24:
+                 try:
+                     query_ids.append(ObjectId(uid))
+                 except: pass
+    except: pass
+    
+    machine_query = {"_id": {"$in": query_ids}}
+    if customerId:
+        machine_query["customerId"] = customerId
+        
+    try:
+        # Only fetch _id and status fields
+        m_cursor = machines_col.find(machine_query, {"_id": 1, "status": 1, "statusName": 1})
+        machines_list = await m_cursor.to_list(length=None)
     except Exception as e:
         return {"dates": [], "statuses": {}, "error": str(e)}
 
-    # Parse dataUpdatedTime and group by date and status
-    date_status_map = {}
+    # Map machineId -> status
+    machine_status_map = {}
+    for m in machines_list:
+        # key by str(_id)
+        mid = str(m.get("_id"))
+        st = m.get("statusName") or m.get("status") or "Unknown"
+        machine_status_map[mid] = st
+
+    # 5. Build Aggregation Map
+    # date -> {Status: count}
+    date_status_map = {d: {"Normal": 0, "Satisfactory": 0, "Alert": 0, "Unacceptable": 0} for d in target_dates}
     
-    for machine in all_machines:
-        data_time = machine.get("dataUpdatedTime", "")
-        status = machine.get("status") or machine.get("statusName") or "Unknown"
-        
-        if not data_time:
-            continue
+    for r_date, m_id in events:
+        if m_id in machine_status_map:
+            st = machine_status_map[m_id]
+            st_lower = st.lower()
             
-        try:
-            # Try to parse "Wed, 05 Jun 2024 18:30:00 GMT" format
-            parsed_date = parsedate_to_datetime(data_time)
-            machine_date = parsed_date.date()
-        except Exception:
-            try:
-                # Try ISO format or other formats
-                if "T" in str(data_time):
-                    machine_date = datetime.fromisoformat(str(data_time).replace('Z', '+00:00')).date()
-                else:
-                    machine_date = datetime.strptime(str(data_time)[:10], "%Y-%m-%d").date()
-            except Exception:
-                continue
-        
-        # Check if date is within range
-        if machine_date < start.date() or machine_date > end.date():
-            continue
+            bucket = None
+            if st_lower == "normal": bucket = "Normal"
+            elif st_lower == "satisfactory": bucket = "Satisfactory"
+            elif st_lower == "alert": bucket = "Alert"
+            elif st_lower in ["unacceptable", "unsatisfactory"]: bucket = "Unacceptable"
             
-        date_str = machine_date.strftime("%Y-%m-%d")
-        
-        if date_str not in date_status_map:
-            date_status_map[date_str] = {"Normal": 0, "Satisfactory": 0, "Alert": 0, "Unacceptable": 0}
-        
-        # Normalize status
-        status_lower = status.lower() if status else ""
-        if status_lower == "normal":
-            date_status_map[date_str]["Normal"] += 1
-        elif status_lower == "satisfactory":
-            date_status_map[date_str]["Satisfactory"] += 1
-        elif status_lower == "alert":
-            date_status_map[date_str]["Alert"] += 1
-        elif status_lower in ["unacceptable", "unsatisfactory"]:
-            date_status_map[date_str]["Unacceptable"] += 1
-
+            if bucket:
+                date_status_map[r_date][bucket] += 1
+                
+    # 6. Format Return Data (View Logic)
     statuses = ["Normal", "Unacceptable", "Alert", "Satisfactory"]
-
-    def daily_dates():
-        current = start
-        while current <= end:
-            yield current.strftime("%Y-%m-%d")
-            current += timedelta(days=1)
-
+    result_dict = {s: [] for s in statuses}
+    labels = []
+    
+    # Internal helpers for view generation
     def weekly_ranges():
         current = start
         while current <= end:
@@ -150,36 +214,41 @@ async def stacked_chart(
             yield (month_start, month_end, month_start.strftime("%Y-%m"))
             current = next_month
 
-    result_dict = {s: [] for s in statuses}
-    labels = []
-
     if view == "daily":
-        for date_str in daily_dates():
-            labels.append(date_str)
+        for d in target_dates:
+            labels.append(d)
             for s in statuses:
-                result_dict[s].append(date_status_map.get(date_str, {}).get(s, 0))
-
+                result_dict[s].append(date_status_map[d].get(s, 0))
+                
     elif view == "weekly":
-        for week_start, week_end, label in weekly_ranges():
-            labels.append(label)
+        for ws, we, lbl in weekly_ranges():
+            labels.append(lbl)
+            # sum counts for days in checking range
+            range_days = []
+            c = ws
+            while c <= we:
+                range_days.append(c.strftime("%Y-%m-%d"))
+                c += timedelta(days=1)
+                
             for s in statuses:
-                week_count = sum(
-                    date_status_map.get((week_start + timedelta(days=i)).strftime("%Y-%m-%d"), {}).get(s, 0)
-                    for i in range((week_end - week_start).days + 1)
-                )
-                result_dict[s].append(week_count)
-
+                count = sum(date_status_map.get(rd, {}).get(s, 0) for rd in range_days)
+                result_dict[s].append(count)
+                
     elif view == "monthly":
-        for month_start, month_end, label in monthly_ranges():
-            labels.append(label)
+        for ms, me, lbl in monthly_ranges():
+            labels.append(lbl)
+            range_days = []
+            c = ms
+            while c <= me:
+                range_days.append(c.strftime("%Y-%m-%d"))
+                c += timedelta(days=1)
+                
             for s in statuses:
-                month_count = sum(
-                    date_status_map.get((month_start + timedelta(days=i)).strftime("%Y-%m-%d"), {}).get(s, 0)
-                    for i in range((month_end - month_start).days + 1)
-                )
-                result_dict[s].append(month_count)
+                count = sum(date_status_map.get(rd, {}).get(s, 0) for rd in range_days)
+                result_dict[s].append(count)
+                
     else:
-        return {"error": "Invalid view type. Use 'daily', 'weekly', or 'monthly'."}
-
+        return {"error": "Invalid view type"}
+        
     return {"dates": labels, "statuses": result_dict}
 
