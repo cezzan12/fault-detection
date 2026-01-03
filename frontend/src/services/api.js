@@ -254,9 +254,12 @@ export const extractFilterOptions = (machines = []) => {
 export const generateCustomerTrendData = (machines = []) => {
   const dateCustomerMap = {};
 
+  console.log('[CustomerTrend] Processing', machines.length, 'machines');
+  console.log('[CustomerTrend] Sample machine:', machines[0]);
+
   machines.forEach(machine => {
     // Extract date from multiple possible sources
-    let dateStr = 'Unknown';
+    let dateStr = null;
 
     // Try 'date' field first (from transformed data)
     if (machine.date && machine.date !== 'N/A') {
@@ -264,18 +267,42 @@ export const generateCustomerTrendData = (machines = []) => {
     }
     // Fallback to dataUpdatedTime
     else if (machine.dataUpdatedTime && machine.dataUpdatedTime !== 'N/A') {
-      try {
-        const date = new Date(machine.dataUpdatedTime);
-        if (!isNaN(date.getTime())) {
-          dateStr = date.toISOString().split('T')[0];
+      const rawDate = machine.dataUpdatedTime;
+
+      // Try parsing RFC 2822 format first (e.g., "Wed, 05 Jun 2024 18:30:00 GMT")
+      if (typeof rawDate === 'string' && rawDate.includes(',') && rawDate.includes('GMT')) {
+        try {
+          const date = new Date(rawDate);
+          if (!isNaN(date.getTime())) {
+            dateStr = date.toISOString().split('T')[0];
+          }
+        } catch (e) {
+          // Will try other formats below
         }
-      } catch (e) {
-        // Try to extract date string directly
-        if (typeof machine.dataUpdatedTime === 'string' && machine.dataUpdatedTime.includes('-')) {
-          dateStr = machine.dataUpdatedTime.split('T')[0];
+      }
+
+      // Try ISO format or direct parsing
+      if (!dateStr) {
+        try {
+          const date = new Date(rawDate);
+          if (!isNaN(date.getTime())) {
+            dateStr = date.toISOString().split('T')[0];
+          }
+        } catch (e) {
+          // Try to extract date string directly
+          if (typeof rawDate === 'string') {
+            if (rawDate.includes('T')) {
+              dateStr = rawDate.split('T')[0];
+            } else if (rawDate.includes('-') && rawDate.length >= 10) {
+              dateStr = rawDate.substring(0, 10);
+            }
+          }
         }
       }
     }
+
+    // Skip machines without valid date
+    if (!dateStr) return;
 
     // Use customerName instead of customerId for display
     const customerName = machine.customerName || machine.customerId || 'Unknown';
@@ -296,6 +323,9 @@ export const generateCustomerTrendData = (machines = []) => {
       ...customers
     }))
     .sort((a, b) => a.date.localeCompare(b.date));
+
+  console.log('[CustomerTrend] Generated trend data:', trendData);
+  console.log('[CustomerTrend] Unique dates:', trendData.map(d => d.date));
 
   return trendData;
 };

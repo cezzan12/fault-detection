@@ -125,8 +125,8 @@ function App() {
         const kpi = calculateKpiFromMachines(machines);
         setKpiData(kpi);
 
-        // Generate customer trend data (limited processing)
-        const customerTrends = generateCustomerTrendData(machines.slice(0, 200));
+        // Generate customer trend data from all machines for accurate counts
+        const customerTrends = generateCustomerTrendData(machines);
         setCustomerTrendData(customerTrends);
 
         // Extract filter options
