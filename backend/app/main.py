@@ -72,8 +72,10 @@ app = FastAPI(title="Machine Monitoring API", lifespan=lifespan)
 # ------------------- Request Logging Middleware -------------------
 class RequestLoggingMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
+        import sys
         # Log incoming request
-        print(f"{request.method} {request.url.path}")
+        print(f"➡️ {request.method} {request.url.path}")
+        sys.stdout.flush()
         
         # Process request
         start_time = time.time()
@@ -81,7 +83,8 @@ class RequestLoggingMiddleware(BaseHTTPMiddleware):
         process_time = time.time() - start_time
         
         # Log completed request with status code
-        print(f"{request.method} {request.url.path} - {response.status_code} ({process_time:.3f}s)")
+        print(f"✅ {request.method} {request.url.path} - {response.status_code} ({process_time:.3f}s)")
+        sys.stdout.flush()
         
         return response
 

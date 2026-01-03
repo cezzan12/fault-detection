@@ -3,6 +3,8 @@ FFT Analysis Service for Bearing Condition Monitoring
 
 This module provides FFT-based analysis for bearing condition monitoring and fault diagnosis.
 All calculations use only real sensor data - no assumptions or dummy values.
+
+Signal processing functions are imported from rnsit_fft module.
 """
 
 import numpy as np
@@ -11,6 +13,26 @@ from scipy import signal
 import scipy.integrate
 from typing import Dict, List, Optional, Tuple, Any
 import logging
+
+# Import ALL signal processing functions from RNSIT FFT module
+try:
+    from app.services.rnsit_fft import (
+        butter_highpass,
+        butter_highpass_filter,
+        FFT as FFT_simple,  # Renamed to maintain compatibility
+        hann_data,
+        Velocity_Convert_24_DEMO,
+        Acceleration_Convert_32_DEMO
+    )
+except ImportError:
+    from services.rnsit_fft import (
+        butter_highpass,
+        butter_highpass_filter,
+        FFT as FFT_simple,
+        hann_data,
+        Velocity_Convert_24_DEMO,
+        Acceleration_Convert_32_DEMO
+    )
 
 # ISO 10816-3 Velocity RMS thresholds (mm/s) for different machine classes
 # Note: Using 99999 instead of inf for JSON compatibility
@@ -62,73 +84,14 @@ def sanitize_dict(obj):
 
 # ==========================================
 # SIGNAL PROCESSING FUNCTIONS
+# All imported from rnsit_fft.py:
+# - butter_highpass
+# - butter_highpass_filter  
+# - FFT_simple (FFT from rnsit_fft)
+# - hann_data
+# - Velocity_Convert_24_DEMO
+# - Acceleration_Convert_32_DEMO
 # ==========================================
-
-def butter_highpass(cutoff: float, fs: float, order: int = 2) -> Tuple[np.ndarray, np.ndarray]:
-    """
-    Design a Butterworth highpass filter.
-    
-    Args:
-        cutoff: Cutoff frequency in Hz
-        fs: Sampling frequency in Hz
-        order: Filter order (default 2)
-        
-    Returns:
-        Tuple of (b, a) filter coefficients
-    """
-    nyq = 0.5 * fs
-    normal_cutoff = cutoff / nyq
-    b, a = signal.butter(order, normal_cutoff, btype='highpass', analog=False)
-    return b, a
-
-
-def butter_highpass_filter(data: np.ndarray, cutoff: float, fs: float, order: int = 2) -> np.ndarray:
-    """
-    Apply a Butterworth highpass filter to the data.
-    
-    Args:
-        data: Input signal
-        cutoff: Cutoff frequency in Hz
-        fs: Sampling frequency in Hz
-        order: Filter order (default 2)
-        
-    Returns:
-        Filtered signal
-    """
-    b, a = butter_highpass(cutoff, fs, order=order)
-    y = signal.filtfilt(b, a, data)
-    return y
-
-
-def hann_data(data: np.ndarray) -> np.ndarray:
-    """
-    Apply Hanning window to the data.
-    
-    Args:
-        data: Input signal
-        
-    Returns:
-        Windowed signal
-    """
-    window = signal.windows.hann(len(data))
-    return data * window
-
-
-def FFT_simple(temp: np.ndarray) -> np.ndarray:
-    """
-    Compute single-sided FFT amplitude spectrum.
-    
-    Args:
-        temp: Input time-domain signal
-        
-    Returns:
-        Single-sided amplitude spectrum (DC component zeroed)
-    """
-    N = len(temp)
-    yf = np.fft.fft(temp)
-    yf = 2.0/N * np.abs(yf[:N//2])
-    yf[0] = 0  # Zero DC component
-    return yf
 
 
 def velocity_convert(rawData: List[float], 
@@ -141,17 +104,10 @@ def velocity_convert(rawData: List[float],
                      highResolution: int = 1,
                      calibrationValue: float = 1.0) -> Dict[str, Any]:
     """
-    Convert acceleration data to velocity and compute FFT using overlapping block averaging.
+    Wrapper function that uses RNSIT FFT implementation for velocity conversion.
     
-    This is the correct signal processing pipeline:
-    1. Convert acceleration from g to mm/s^2 
-    2. Remove DC offset
-    3. Integrate acceleration to velocity
-    4. Apply Butterworth highpass filter
-    5. Use overlapping blocks with Hanning window
-    6. Average FFT across blocks
-    7. Apply floor noise attenuation
-    8. Apply calibration value
+    Converts acceleration data to velocity and computes FFT using the 
+    Velocity_Convert_24_DEMO function from rnsit_fft module.
     
     Args:
         rawData: Raw acceleration data (in g)
@@ -167,134 +123,26 @@ def velocity_convert(rawData: List[float],
     Returns:
         Dict with SR, Timeseries data, FFT data, and frequency ranges
     """
-    # Determine overlapping percentage based on data length
-    if 40000 < len(rawData) < 50000:
-        overlappingPercentage = 60
-    else:
-        overlappingPercentage = 80
-    
-    # Set block size based on resolution
-    if highResolution > 1:
-        blockSize = int(20000 * (highResolution/2))
-    else:
-        blockSize = 20000
-    
-    # Ensure we don't exceed available data
-    blockSize = min(blockSize, len(rawData))
-    
-    # Convert acceleration from g to mm/s^2
-    velocity_Timeseries_mms2 = np.array(rawData) * 9807
-    
-    N = min(blockSize, len(velocity_Timeseries_mms2))
-    time_step = 1 / SR
-    time = np.linspace(0.0, N * time_step, N)
-    
-    # Remove DC offset
-    velocity_Timeseries_mms2 = velocity_Timeseries_mms2 - np.mean(velocity_Timeseries_mms2)
-    
-    # Integrate acceleration to velocity
-    time_array = np.linspace(0.0, len(velocity_Timeseries_mms2) * time_step, len(velocity_Timeseries_mms2))
-    velocity_Timeseries = scipy.integrate.cumulative_trapezoid(velocity_Timeseries_mms2, x=time_array, initial=0)
-    
-    # Use cutoff frequency (can be adjusted based on RPM)
-    rms_cutoff_value = cutoff
-    
-    # Apply highpass filter to full timeseries
-    final_velocity_Timeseries = butter_highpass_filter(velocity_Timeseries, rms_cutoff_value, SR, 2)
-    
-    # Compute FFT using overlapping blocks
-    velocity_FFT_Data_list = []
-    num_blocks = 4
-    
-    for i in range(num_blocks):
-        start = int(i * (1 - (overlappingPercentage / 100)) * blockSize)
-        end = start + blockSize
-        
-        if end > len(velocity_Timeseries_mms2):
-            break
-            
-        # Integrate block to velocity
-        block_time = np.linspace(0.0, (end - start) * time_step, end - start)
-        velocity_Timeseries_i = scipy.integrate.cumulative_trapezoid(
-            velocity_Timeseries_mms2[start:end], 
-            x=block_time,
-            initial=0
-        )
-        
-        # Apply highpass filter
-        velocity_Timeseries_i = butter_highpass_filter(velocity_Timeseries_i, rms_cutoff_value, SR, 2)
-        
-        # Apply Hanning window and compute FFT, multiply by 2 for amplitude correction
-        velocity_FFT_Data_i = FFT_simple(hann_data(velocity_Timeseries_i)) * 2
-        velocity_FFT_Data_list.append(velocity_FFT_Data_i)
-    
-    # Average FFT across blocks
-    if velocity_FFT_Data_list:
-        # Ensure all arrays have the same length
-        min_len = min(len(arr) for arr in velocity_FFT_Data_list)
-        velocity_FFT_Data_list = [arr[:min_len] for arr in velocity_FFT_Data_list]
-        velocity_FFT_Data = sum(velocity_FFT_Data_list) / len(velocity_FFT_Data_list)
-    else:
-        # Fallback to single block FFT
-        velocity_FFT_Data = FFT_simple(hann_data(final_velocity_Timeseries[:blockSize])) * 2
-    
-    # Generate frequency axis
-    velocity_FFT_X_Data = np.linspace(0.0, SR / 2, num=len(velocity_FFT_Data))
-    
-    # Apply floor noise attenuation
-    if floorNoiseThresholdPercentage not in (None, 0) and floorNoiseAttenuationFactor not in (None, 0):
-        threshold = np.max(velocity_FFT_Data) * floorNoiseThresholdPercentage
-        velocity_FFT_Data = np.where(
-            velocity_FFT_Data < threshold, 
-            velocity_FFT_Data / floorNoiseAttenuationFactor, 
-            velocity_FFT_Data
-        )
-    else:
-        # Default attenuation
-        velocity_FFT_Data = np.where(
-            velocity_FFT_Data < (np.max(velocity_FFT_Data) * 0.05), 
-            velocity_FFT_Data / 1.1, 
-            velocity_FFT_Data
-        )
-    
-    # Attenuate frequencies below cutoff
-    cutoff_idx = np.where(velocity_FFT_X_Data > rms_cutoff_value)[0]
-    if len(cutoff_idx) > 0:
-        velocity_FFT_Data[:cutoff_idx[0]] *= 0.2
-    
-    cutoff_75_idx = np.where(velocity_FFT_X_Data > (rms_cutoff_value * 0.75))[0]
-    if len(cutoff_75_idx) > 0:
-        velocity_FFT_Data[:cutoff_75_idx[0]] *= 0.05
-    
-    # Apply calibration and round
-    velocity_FFT_Data = np.round(velocity_FFT_Data, 8) * calibrationValue
-    
-    # Limit to fmax if specified
-    if fmax is not None:
-        filtered_indices = velocity_FFT_X_Data < fmax
-        Final_Velocity_FFT_Data = list(zip(velocity_FFT_X_Data[filtered_indices], velocity_FFT_Data[filtered_indices]))
-    else:
-        Final_Velocity_FFT_Data = list(zip(velocity_FFT_X_Data, velocity_FFT_Data))
-    
-    # Generate timeseries output
-    v1 = (len(final_velocity_Timeseries) / SR) / len(final_velocity_Timeseries)
-    final_Timeseries_Data = np.round(final_velocity_Timeseries, 8)
-    Final_Velocity_Temp_Data = [[i * v1, float(final_Timeseries_Data[i])] for i in range(len(final_Timeseries_Data))]
-    
-    return {
-        "SR": SR,
-        "twf_min": Final_Velocity_Temp_Data[0][0] if Final_Velocity_Temp_Data else 0,
-        "twf_max": Final_Velocity_Temp_Data[-1][0] if Final_Velocity_Temp_Data else 0,
-        "Timeseries": Final_Velocity_Temp_Data,
-        "fft_min": Final_Velocity_FFT_Data[0][0] if Final_Velocity_FFT_Data else 0,
-        "fft_max": Final_Velocity_FFT_Data[-1][0] if Final_Velocity_FFT_Data else 0,
-        "FFT": Final_Velocity_FFT_Data
-    }
+    return Velocity_Convert_24_DEMO(
+        rawData=rawData,
+        SR=SR,
+        RPM=RPM,
+        cutoff=cutoff,
+        Order=2,
+        fmax=fmax,
+        floorNoiseThresholdPercentage=floorNoiseThresholdPercentage,
+        floorNoiseAttenuationFactor=floorNoiseAttenuationFactor,
+        highResolution=highResolution,
+        calibrationValue=calibrationValue
+    )
 
 
 def acceleration_convert(Data: List[float], SR: float, fmax: Optional[float] = None) -> Dict[str, Any]:
     """
-    Process acceleration data and compute FFT.
+    Wrapper function that uses RNSIT FFT implementation for acceleration processing.
+    
+    Processes acceleration data and computes FFT using the 
+    Acceleration_Convert_32_DEMO function from rnsit_fft module.
     
     Args:
         Data: Raw acceleration data
@@ -304,49 +152,7 @@ def acceleration_convert(Data: List[float], SR: float, fmax: Optional[float] = N
     Returns:
         Dict with SR, Timeseries data, FFT data, and frequency ranges
     """
-    Acceleration_Timeseries_Data = np.array(Data)
-    
-    Filter_Cutoff = 10
-    Filter_Order = 4
-    
-    # Apply highpass filter
-    first_filter_data = butter_highpass_filter(Acceleration_Timeseries_Data, Filter_Cutoff, SR, Filter_Order)
-    
-    # Compute FFT with Hanning window and amplitude correction
-    Acceleration_FFT_Data = (FFT_simple(hann_data(first_filter_data)) * 0.707) * 2.1
-    
-    # Generate frequency axis
-    Acceleration_FFT_X_Data = np.linspace(0.0, SR / 2, num=len(Acceleration_FFT_Data))
-    
-    # Limit to fmax if specified
-    if fmax is not None:
-        filtered_indices = Acceleration_FFT_X_Data < fmax
-        Final_Acceleration_FFT_Data = list(zip(
-            Acceleration_FFT_X_Data[filtered_indices], 
-            Acceleration_FFT_Data[filtered_indices]
-        ))
-    else:
-        Final_Acceleration_FFT_Data = list(zip(Acceleration_FFT_X_Data, Acceleration_FFT_Data))
-    
-    # Trim first 10% of timeseries (startup artifacts)
-    Acceleration_Timeseries_Data = Acceleration_Timeseries_Data[int(len(Acceleration_Timeseries_Data) * 0.1):]
-    
-    # Generate timeseries output
-    v1 = (len(Acceleration_Timeseries_Data) / SR) / len(Acceleration_Timeseries_Data)
-    Final_Acceleration_Timeseries_Data = [
-        [i * v1, float(Acceleration_Timeseries_Data[i])] 
-        for i in range(len(Acceleration_Timeseries_Data))
-    ]
-    
-    return {
-        "SR": SR,
-        "twf_min": Final_Acceleration_Timeseries_Data[0][0] if Final_Acceleration_Timeseries_Data else 0,
-        "twf_max": Final_Acceleration_Timeseries_Data[-1][0] if Final_Acceleration_Timeseries_Data else 0,
-        "Timeseries": Final_Acceleration_Timeseries_Data,
-        "fft_min": Final_Acceleration_FFT_Data[0][0] if Final_Acceleration_FFT_Data else 0,
-        "fft_max": Final_Acceleration_FFT_Data[-1][0] if Final_Acceleration_FFT_Data else 0,
-        "FFT": Final_Acceleration_FFT_Data
-    }
+    return Acceleration_Convert_32_DEMO(Data=Data, SR=SR, fmax=fmax)
 
 def compute_fft(raw_data: List[float], sample_rate: float) -> Tuple[np.ndarray, np.ndarray]:
     """
@@ -719,8 +525,8 @@ def perform_complete_analysis(raw_data: List[float],
     running_freq = rpm / 60.0
     logging.info(f"Running frequency: {running_freq:.2f} Hz")
     
-    # Calculate fmax for FFT output (12× running frequency)
-    fmax = min(running_freq * 12, sample_rate / 2)
+    # Use full Nyquist frequency (no artificial limit)
+    fmax = 1500
     
     # Use the new velocity conversion with proper signal processing
     velocity_result = velocity_convert(

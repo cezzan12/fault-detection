@@ -1,6 +1,6 @@
 import React, { useState, useMemo } from 'react';
 import { ChevronLeft, ChevronRight, Eye, Wifi, WifiOff, Loader2, AlertTriangle, Database, FileText, Download, CheckSquare, Square, XCircle } from 'lucide-react';
-import ReportGenerator from './ReportGenerator';
+import BearingReportGenerator from './BearingReportGenerator';
 import MultiReportGenerator from './MultiReportGenerator';
 import './MachinesTable.css';
 
@@ -418,10 +418,8 @@ ${selectedMachine.status === 'unacceptable' ? '• IMMEDIATE inspection required
                             <FileText size={16} />
                             <span>Selected: <strong>{selectedMachine.machineName}</strong></span>
                           </div>
-                          <ReportGenerator
+                          <BearingReportGenerator
                             machine={selectedMachine}
-                            onGenerateStart={() => setGeneratingReport(true)}
-                            onGenerateEnd={() => setGeneratingReport(false)}
                           />
                         </div>
                       </td>

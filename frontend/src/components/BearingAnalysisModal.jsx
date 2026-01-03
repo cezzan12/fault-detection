@@ -94,8 +94,8 @@ const BearingAnalysisModal = ({ bearing, machine, onClose }) => {
         const runningFreq = analysisData.runningFrequency || 25;
         const harmonics = axisData.harmonics || [];
 
-        // Calculate max values
-        const maxFreq = Math.max(...spectrum.map(d => d.frequency), runningFreq * 12);
+        // Calculate max values - use full spectrum frequency range
+        const maxFreq = Math.max(...spectrum.map(d => d.frequency));
         // Use tighter amplitude scaling for better peak visibility
         // Find the actual max amplitude from data and add only 5% headroom
         const actualMaxAmp = Math.max(...spectrum.map(d => d.amplitude));
