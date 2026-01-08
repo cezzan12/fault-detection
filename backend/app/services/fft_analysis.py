@@ -483,7 +483,8 @@ def perform_complete_analysis(raw_data: List[float],
                               cutoff: float = 4.0,
                               calibration_value: float = 1.0,
                               floor_noise_threshold: Optional[float] = None,
-                              floor_noise_attenuation: Optional[float] = None) -> Dict[str, Any]:
+                              floor_noise_attenuation: Optional[float] = None,
+                              fmax: Optional[float] = None) -> Dict[str, Any]:
     """
     Perform complete FFT analysis on vibration data using proper signal processing.
     
@@ -505,6 +506,7 @@ def perform_complete_analysis(raw_data: List[float],
         calibration_value: Calibration multiplier, default 1.0
         floor_noise_threshold: Threshold percentage for noise attenuation (optional)
         floor_noise_attenuation: Factor to divide noise by (optional)
+        fmax: Maximum frequency for FFT output (optional, defaults to sample_rate/4)
         
     Returns:
         Complete analysis results with FFT spectrum, peaks, harmonics, and diagnosis
@@ -525,8 +527,10 @@ def perform_complete_analysis(raw_data: List[float],
     running_freq = rpm / 60.0
     logging.info(f"Running frequency: {running_freq:.2f} Hz")
     
-    # Use full Nyquist frequency (no artificial limit)
-    fmax = 1500
+    # Use fmax from API data if provided, otherwise default to sample_rate/4
+    if fmax is None:
+        fmax = sample_rate / 4
+    logging.info(f"Using fmax: {fmax:.2f} Hz")
     
     # Use the new velocity conversion with proper signal processing
     velocity_result = velocity_convert(

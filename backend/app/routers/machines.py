@@ -964,6 +964,15 @@ async def get_fft_analysis(
                     
                     logging.info(f"Performing FFT analysis for {axis}: {len(raw_data)} points, RPM={rpm}, SR={sample_rate}")
                     
+                    # Extract fmax from API data if available (check both cases)
+                    api_fmax = data.get('fMax') or data.get('fmax')
+                    if api_fmax:
+                        try:
+                            api_fmax = float(api_fmax)
+                            logging.info(f"Using fmax from API: {api_fmax} Hz")
+                        except (ValueError, TypeError):
+                            api_fmax = None
+                    
                     # Perform FFT analysis
                     axis_short = axis.replace('-Axis', '')
                     analysis = perform_complete_analysis(
@@ -971,7 +980,8 @@ async def get_fft_analysis(
                         sample_rate=sample_rate,
                         rpm=rpm,
                         axis=axis_short,
-                        machine_class=machine_class
+                        machine_class=machine_class,
+                        fmax=api_fmax  # Pass fmax from API data
                     )
                     
                     axis_results[axis] = {
